@@ -72,6 +72,10 @@ class AdminState(StatesGroup):
     category = State()
     photo = State()
 
+class BudgetRequestState(StatesGroup):
+    budget = State()
+    preferences = State()
+
 
 try:
     from yookassa import Payment
@@ -256,10 +260,19 @@ async def show_bouquets(message: Message):
             """)
             bouquets = [dict(row) for row in cur.fetchall()]
 
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")],
+            [InlineKeyboardButton(text="💰 Подбор под бюджет", callback_data="budget_selection")]  # Новая кнопка
+        ])
+
         if not bouquets:
             await message.answer(
                 "🌺 <b>На сегодня букеты еще готовятся!</b>\n\n"
-                "Наши флористы создают новые композиции.",
+                "Наши флористы создают новые композиции. "
+                "Пожалуйста, зайдите позже или свяжитесь с менеджером для индивидуального заказа.\n\n"
+                "💡 <i>Не нашли подходящий букет? Свяжитесь с менеджером, "
+                "и мы подберем букет под ваш запрос и бюджет!</i>",  # Добавляем текст
+                reply_markup=kb,
                 parse_mode="HTML"
             )
             return
@@ -1152,6 +1165,117 @@ async def cancel_order(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.answer("❌ Заказ отменен.")
     await callback.answer()
+
+
+# Обработчик для новой кнопки
+@router.message(F.text == "💰 Подбор под бюджет")
+async def budget_menu_handler(message: Message, state: FSMContext):
+    await start_budget_selection_from_message(message, state)
+
+
+@router.message(F.text.contains("бюджет"))
+async def budget_keyword_handler(message: Message, state: FSMContext):
+    """Обработчик ключевого слова "бюджет" """
+    await start_budget_selection_from_message(message, state)
+
+async def start_budget_selection_from_message(message: Message, state: FSMContext):
+    """Запуск подбора по бюджету из текстового сообщения"""
+    await message.answer(
+        "💰 <b>Подбор букета под ваш бюджет</b>\n\n"
+        "Не нашли подходящий букет? Мы поможем!\n\n"
+        "💡 Наши флористы подберут идеальный вариант:\n"
+        "• В рамках вашего бюджета\n"
+        "• С учетом ваших предпочтений\n" 
+        "• Быстро и профессионально\n\n"
+        "📝 Введите сумму вашего бюджета (в рублях):",
+        parse_mode="HTML"
+    )
+    await state.set_state(BudgetRequestState.budget)
+
+
+@router.callback_query(F.data == "budget_selection")
+async def start_budget_selection(callback: CallbackQuery, state: FSMContext):
+    """Начало процесса подбора по бюджету"""
+    await callback.message.answer(
+        "💰 <b>Подбор букета под ваш бюджет</b>\n\n"
+        "Наши флористы подберут идеальный букет именно для вас!\n\n"
+        "💡 Укажите ваш бюджет, и мы предложим:\n"
+        "• Несколько вариантов букетов\n"
+        "• Индивидуальные рекомендации\n"
+        "• Быстрый ответ в течение 15 минут\n\n"
+        "📝 Введите сумму вашего бюджета (в рублях):",
+        parse_mode="HTML"
+    )
+    await state.set_state(BudgetRequestState.budget)
+    await callback.answer()
+
+
+@router.message(BudgetRequestState.budget)
+async def get_budget_amount(message: Message, state: FSMContext):
+    """Получаем бюджет от пользователя"""
+    try:
+        budget = int(message.text.strip())
+        if budget < 500:  # Минимальный бюджет
+            await message.answer("❌ Минимальный бюджет - 500 рублей. Введите сумму еще раз:")
+            return
+
+        await state.update_data(budget=budget)
+        await message.answer(
+            "🎨 <b>Расскажите о ваших предпочтениях</b>\n\n"
+            "Что бы вы хотели видеть в букете?\n\n"
+            "Например:\n"
+            "• Любимые цветы (розы, тюльпаны, хризантемы)\n"
+            "• Цветовая гамма (красный, белый, пастельные тона)\n"
+            "• Повод (день рождения, 8 марта, просто так)\n"
+            "• Особые пожелания\n\n"
+            "💬 Опишите кратко, что вам нравится:",
+            parse_mode="HTML"
+        )
+        await state.set_state(BudgetRequestState.preferences)
+
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите число. Например: 2000")
+
+
+@router.message(BudgetRequestState.preferences)
+async def get_budget_preferences(message: Message, state: FSMContext):
+    """Получаем предпочтения и отправляем менеджеру"""
+    preferences = message.text
+    data = await state.get_data()
+    budget = data['budget']
+
+    # Формируем сообщение для менеджера
+    admin_message = (
+        "💰 <b>НОВАЯ ЗАЯВКА: ПОДБОР ПОД БЮДЖЕТ</b>\n\n"
+        f"👤 <b>Клиент:</b> {message.from_user.full_name}\n"
+        f"🆔 <b>ID:</b> {message.from_user.id}\n"
+        f"💵 <b>Бюджет:</b> {budget} ₽\n"
+        f"🎨 <b>Предпочтения:</b>\n{preferences}\n\n"
+        f"⚡ <b>СРОЧНО ОБРАБОТАТЬ!</b>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]])
+
+    # Отправляем всем админам
+    try:
+        await notify_admins(admin_message)
+        await message.answer(
+            "✅ <b>Ваша заявка принята!</b>\n\n"
+            f"💵 Бюджет: {budget} ₽\n"
+            f"🎨 Ваши пожелания: {preferences}\n\n"
+            "📞 Менеджер свяжется с вами в течение 15 минут "
+            "с вариантами букетов в рамках вашего бюджета!\n\n"
+            "💬 Если у вас срочный вопрос, напишите менеджеру", reply_markup=kb,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await message.answer(
+            "❌ Произошла ошибка при отправке заявки. "
+            "Пожалуйста, напишите менеджеру", reply_markup=kb
+        )
+        logger.error(f"Budget request error: {e}")
+
+    await state.clear()
 
 
 # --- ОФОРМЛЕНИЕ ЗАКАЗА ---

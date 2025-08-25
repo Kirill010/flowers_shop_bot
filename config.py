@@ -38,7 +38,6 @@ Path("data").mkdir(exist_ok=True)
 Path("ssl").mkdir(exist_ok=True)
 Path("certificates").mkdir(exist_ok=True)
 
-
 # rm -rf venv
 # python3.10 -m venv venv
 # source venv/bin/activate

@@ -7,6 +7,7 @@ from aiogram.types import (
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🌸 Каталог")],
+        [KeyboardButton(text="💰 Подбор под бюджет")],
         [KeyboardButton(text="🚚 Доставка")],
         [KeyboardButton(text="📞 Менеджер")],
         [KeyboardButton(text="📍 На карте")],
@@ -106,6 +107,7 @@ def bonus_usage_keyboard(available_bonus: int, max_allowed: int):
             [InlineKeyboardButton(text="💳 Без бонусов", callback_data="use_bonus_no")]
         ]
     )
+
 
 # --------------
 
