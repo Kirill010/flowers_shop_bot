@@ -28,6 +28,7 @@ MAX_BONUS_PERCENTAGE = 0.3  # 30%
 BONUS_EARN_PERCENTAGE = 0.1  # 10%
 
 # Настройка логирования
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 bot = Bot(token=BOT_TOKEN)
@@ -36,14 +37,13 @@ bot = Bot(token=BOT_TOKEN)
 MENU_COMMANDS = {
     "🌸 Каталог", "🚚 Доставка", "📞 Менеджер", "📍 На карте",
     "🎁 Сертификат", "⭐ Отзывы", "🛒 Корзина", "🧾 Мои заказы",
-    "⬅️ Назад в меню", "🏠 В меню"
+    "⬅️ Назад в меню", "🏠 В меню", "💎 Мои баллы"
 }
 
 router = Router()
 
 
-# --- FSM ---
-# Добавим новый state для использования бонусов
+# --- FSM для оформления заказа ---
 class OrderState(StatesGroup):
     name = State()
     phone = State()
@@ -54,14 +54,16 @@ class OrderState(StatesGroup):
     payment = State()
     waiting_payment = State()
     certificate_code = State()
-    use_bonus = State()
+    use_bonus = State()  # Новый state для использования бонусов
     bonus_amount = State()
 
 
+# --- FSM для связи с менеджером ---
 class ManagerRequestState(StatesGroup):
     contact_and_question = State()
 
 
+# --- FSM для администратора (добавление товаров) ---
 class AdminState(StatesGroup):
     name = State()
     description = State()
@@ -228,6 +230,7 @@ async def start_cmd(message: Message):
 # --- КАТАЛОГ ---
 @router.message(F.text == "🌸 Каталог")
 async def show_catalog(message: Message):
+    """Показывает категории товаров"""
     await message.answer(
         "🌸 <b>Наш каталог</b>\n\n"
         "Выберите категорию для просмотра товаров:",
@@ -236,13 +239,11 @@ async def show_catalog(message: Message):
     )
 
 
-# Обновим функцию show_products для отображения только ежедневных букетов
 @router.message(F.text == "💐 Букеты")
 async def show_bouquets(message: Message):
+    """Показывает букеты на сегодня"""
     try:
-        # Автоматически чистим старые букеты перед показом
         cleanup_old_daily_products()
-
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
@@ -255,34 +256,22 @@ async def show_bouquets(message: Message):
             """)
             bouquets = [dict(row) for row in cur.fetchall()]
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]
-        ])
-
         if not bouquets:
             await message.answer(
                 "🌺 <b>На сегодня букеты еще готовятся!</b>\n\n"
-                "Наши флористы создают новые композиции. "
-                "Пожалуйста, зайдите позже или свяжитесь с менеджером для индивидуального заказа.", reply_markup=kb,
+                "Наши флористы создают новые композиции.",
                 parse_mode="HTML"
             )
             return
 
         today = datetime.now().strftime("%d.%m.%Y")
         await message.answer(
-            f"🌸 <b>Букеты на сегодня</b>\n"
-            f"📅 <i>{today}</i>\n\n"
-            "Специальная подборка от наших флористов:",
+            f"🌸 <b>Букеты на сегодня</b>\n📅 <i>{today}</i>",
             parse_mode="HTML"
         )
 
         for bouquet in bouquets:
-            text = (
-                f"<b>{bouquet['name']}</b>\n"
-                f"{bouquet['description']}\n"
-                f"💰 <b>Цена: {bouquet['price']} ₽</b>"
-            )
-
+            text = f"<b>{bouquet['name']}</b>\n{bouquet['description']}\n💰 <b>Цена: {bouquet['price']} ₽</b>"
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📖 Подробнее", callback_data=f"details_{bouquet['id']}")],
                 [InlineKeyboardButton(text="🛒 В корзину", callback_data=f"add_{bouquet['id']}")]
@@ -290,30 +279,23 @@ async def show_bouquets(message: Message):
 
             if bouquet.get('photo') and os.path.exists(bouquet['photo']):
                 photo = FSInputFile(bouquet['photo'])
-                await message.answer_photo(
-                    photo=photo,
-                    caption=text,
-                    reply_markup=kb,
-                    parse_mode="HTML"
-                )
+                await message.answer_photo(photo=photo, caption=text, reply_markup=kb, parse_mode="HTML")
             else:
                 await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
     except Exception as e:
-        logger.error(f"Error showing plants: {e}")
+        logger.error(f"Error showing bouquets: {e}")
         await message.answer(
             "❌ Произошла ошибка при загрузке каталога растений. "
             "Пожалуйста, попробуйте позже или свяжитесь с менеджером."
         )
 
 
-# Для горшечных растений оставляем как было
 @router.message(F.text == "🌱 Горшечные растения")
 async def show_plants(message: Message):
+    """Показывает горшечные растения"""
     try:
-        # Получаем ВСЕ горшечные растения, а не только сегодняшние
         cleanup_old_daily_products()
-
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
@@ -325,54 +307,30 @@ async def show_plants(message: Message):
             """)
             plants = [dict(row) for row in cur.fetchall()]
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]
-        ])
-
         if not plants:
             await message.answer(
                 "🌿 <b>Горшечные растения временно отсутствуют!</b>\n\n"
-                "Свяжитесь с менеджером для уточнения наличия и индивидуального заказа.", reply_markup=kb,
+                "Свяжитесь с менеджером для уточнения наличия.",
                 parse_mode="HTML"
             )
             return
 
-        today = datetime.now().strftime("%d.%m.%Y")
-
         await message.answer(
             "🌱 <b>Наши горшечные растения</b>\n\n"
-            "Постоянные жители нашего магазина. Всегда в наличии:",
-            parse_mode="HTML"
-        )
-
-        await message.answer(
-            f"🌸 <b>Горшечные растения на сегодня</b>\n"
-            f"📅 <i>{today}</i>\n\n"
-            "Специальная подборка от наших флористов:",
+            "Постоянные жители нашего магазина:",
             parse_mode="HTML"
         )
 
         for plant in plants:
-            text = (
-                f"<b>{plant['name']}</b>\n"
-                f"{plant['description']}\n"
-                f"💰 <b>Цена: {plant['price']} ₽</b>"
-            )
-
-            # Клавиатура с кнопками "Подробнее" и "В корзину"
+            text = f"<b>{plant['name']}</b>\n{plant['description']}\n💰 <b>Цена: {plant['price']} ₽</b>"
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📖 Подробнее", callback_data=f"daily_details_{plant['id']}")],
-                [InlineKeyboardButton(text="🛒 В корзину", callback_data=f"daily_add_{plant['id']}")]
+                [InlineKeyboardButton(text="📖 Подробнее", callback_data=f"details_{plant['id']}")],
+                [InlineKeyboardButton(text="🛒 В корзину", callback_data=f"add_{plant['id']}")]
             ])
 
             if plant.get('photo') and os.path.exists(plant['photo']):
                 photo = FSInputFile(plant['photo'])
-                await message.answer_photo(
-                    photo=photo,
-                    caption=text,
-                    reply_markup=kb,
-                    parse_mode="HTML"
-                )
+                await message.answer_photo(photo=photo, caption=text, reply_markup=kb, parse_mode="HTML")
             else:
                 await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
@@ -387,6 +345,7 @@ async def show_plants(message: Message):
 # --- ПОДРОБНОЕ ОПИСАНИЕ ---
 @router.callback_query(F.data.startswith("details_"))
 async def show_details(callback: CallbackQuery):
+    """Показывает подробную информацию о товаре"""
     product_id = int(callback.data.split("_")[1])
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
@@ -430,13 +389,14 @@ async def back_to_main(callback: CallbackQuery):
 # --- ДОСТАВКА И ОПЛАТА ---
 @router.message(F.text == "🚚 Доставка")
 async def delivery_info(message: Message):
+    # Меню раздела "Доставка и оплата"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        # [InlineKeyboardButton(text="🚗 Условия доставки", callback_data="delivery_conditions")],
+        [InlineKeyboardButton(text="🚗 Условия доставки", callback_data="delivery_conditions")],
         [InlineKeyboardButton(text="💳 Способы оплаты", callback_data="payment_methods")],
-        # [InlineKeyboardButton(text="📦 Самовывоз", callback_data="pickup_info")],
+        [InlineKeyboardButton(text="📦 Самовывоз", callback_data="pickup_info")],
         [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]
     ])
-
+    # Сообщение можно сделать более соответствующим ТЗ
     await message.answer(
         "<b>🚚 ДОСТАВКА И ОПЛАТА</b>\n\n"
         "Здесь вы найдёте всю информацию о способах оплаты.\n"
@@ -448,15 +408,17 @@ async def delivery_info(message: Message):
 
 @router.callback_query(F.data == "delivery_conditions")
 async def show_delivery_info(callback: CallbackQuery):
+    # Текст полностью соответствует ТЗ и добавляет ясности
     text = (
         "<b>Условия доставки</b>\n\n"
-        "🚚 <b>Доставка по Москве:</b>\n"
         "<b>– По городу:</b> 300 ₽\n"
         "<b>– За МКАД: индивидуальный расчет</b>\n\n"
-        "📦 <b>Самовывоз:</b>\n"
-        "Бесплатно по адресу: 1-й Вешняковский пр., 2А\n\n"
-        "💬 <b>Для уточнения деталей:</b>\n"
-        "Спросите у менеджера 👇"
+        "<b>Сроки:</b>\n"
+        "– В день заказа (при оформлении до 15:00)\n"
+        "– На следующую дату (при оформлении после 15:00)\n"
+        "– На конкретную дату по предзаказу\n\n"
+        "💬 <b>Для точного расчета стоимости доставки:</b>\n"
+        "Свяжитесь с менеджером 👇"
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -775,7 +737,7 @@ async def create_certificate_payment(user_id: int, amount: int, callback: Callba
             "amount": {"value": str(amount), "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                "return_url": "https://t.me/flowersstories_bot"  # URL бота
+                "return_url": "https://t.me/floraland_bot"  # URL бота
             },
             "capture": True,
             "description": f"Подарочный сертификат на {amount}₽",
@@ -1069,7 +1031,7 @@ async def ask_for_review_after_delivery(user_id: int, order_id: int):
     try:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⭐ Оставить отзыв", callback_data=f"review_order_{order_id}")],
-            [InlineKeyboardButton(text="📞 Написать менеджеру", url="https://t.me/mgk71")]
+            [InlineKeyboardButton(text="📞 Написать менеджеру", callback_data="ask_question")]
         ])
 
         await bot.send_message(
@@ -1081,76 +1043,6 @@ async def ask_for_review_after_delivery(user_id: int, order_id: int):
         )
     except Exception as e:
         print(f"Не удалось отправить запрос на отзыв: {e}")
-
-
-@router.message(Command("reviews_debug"))
-async def reviews_debug(message: Message):
-    """Отладочная команда для проверки отзывов"""
-    if not is_admin(message.from_user.id):  # Обновляем проверку
-        await message.answer("❌ Эта команда только для администратора")
-        return
-
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-
-        # Проверяем существует ли таблица отзывов
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='reviews'")
-        table_exists = cur.fetchone()
-
-        if table_exists:
-            cur.execute("SELECT COUNT(*) FROM reviews")
-            count = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM reviews WHERE order_id IS NOT NULL")
-            order_reviews = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM reviews WHERE order_id IS NULL")
-            general_reviews = cur.fetchone()[0]
-
-            text = (
-                f"✅ Таблица отзывов существует\n"
-                f"📊 Всего отзывов: {count}\n"
-                f"📦 Отзывов на заказы: {order_reviews}\n"
-                f"🏪 Общих отзывов: {general_reviews}"
-            )
-
-            await message.answer(text)
-
-            # Показываем последние отзывы
-            cur.execute("SELECT * FROM reviews ORDER BY created_at DESC LIMIT 5")
-            reviews = cur.fetchall()
-            if reviews:
-                text = "📝 Последние 5 отзывов:\n\n"
-                for review in reviews:
-                    order_info = f" (Заказ #{review[5]})" if review[5] else " (Общий)"
-                    text += f"ID: {review[0]}, User: {review[2]}, Rating: {review[4]}{order_info}\n"
-                    text += f"Text: {review[3][:50]}...\n\n"
-                await message.answer(text)
-        else:
-            await message.answer("❌ Таблица отзывов не существует!")
-
-
-@router.message(Command("mark_delivered"))
-async def mark_delivered(message: Message):
-    """Пометить последний заказ как доставленный (для тестирования)"""
-    if not is_admin(message.from_user.id):  # Обновляем проверку
-        await message.answer("❌ Эта команда только для администратора")
-        return
-
-    user_id = message.from_user.id
-    orders = get_user_orders(user_id)
-
-    if not orders:
-        await message.answer("❌ Нет заказов")
-        return
-
-    last_order = orders[0]
-    update_order_status(last_order['id'], 'delivered')
-
-    # Имитируем запрос отзыва
-    await ask_for_review_after_delivery(user_id, last_order['id'])
-
-    await message.answer(f"✅ Заказ #{last_order['id']} помечен как доставленный")
 
 
 # --- КОРЗИНА ---
@@ -1253,6 +1145,13 @@ async def clear_cart_handler(callback: CallbackQuery):
     clear_cart(callback.from_user.id)
     await callback.answer("Корзина очищена")
     await callback.message.edit_text("Корзина пуста.")
+
+
+@router.callback_query(F.data == "cancel_order")
+async def cancel_order(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.answer("❌ Заказ отменен.")
+    await callback.answer()
 
 
 # --- ОФОРМЛЕНИЕ ЗАКАЗА ---
@@ -1400,7 +1299,7 @@ async def get_delivery_type(callback: CallbackQuery, state: FSMContext):
 async def get_address(message: Message, state: FSMContext):
     await state.update_data(address=message.text)
 
-    await state.update_data(delivery_cost=0)
+    await state.update_data(delivery_cost=0)  # Временное значение
 
     available_dates = get_available_delivery_dates()
     dates_kb = InlineKeyboardMarkup(inline_keyboard=[])
@@ -1445,13 +1344,13 @@ async def get_delivery_time(callback: CallbackQuery, state: FSMContext):
     delivery_time = callback.data.split("_")[2]
     await state.update_data(delivery_time=delivery_time)
 
-    # Предлагаем выбрать способ оплаты
+    # Предлагаем выбрать способ оплаты с добавлением "Через менеджера"
     payment_kb = InlineKeyboardMarkup(inline_keyboard=[
-        # [InlineKeyboardButton(text="💳 Онлайн картой", callback_data="pay_online")],
-        # [InlineKeyboardButton(text="💵 Наличными курьеру", callback_data="pay_cash")],
-        # [InlineKeyboardButton(text="🔄 СБП", callback_data="pay_sbp")],
+        [InlineKeyboardButton(text="💳 Онлайн картой", callback_data="pay_online")],
+        [InlineKeyboardButton(text="💵 Наличными при получении", callback_data="pay_cash")],
+        [InlineKeyboardButton(text="🔄 СБП", callback_data="pay_sbp")],
         [InlineKeyboardButton(text="🎁 Сертификат", callback_data="pay_cert")],
-        [InlineKeyboardButton(text="💬 Спросить у менеджера", callback_data="pay_manager")]
+        [InlineKeyboardButton(text="💬 Через менеджера", callback_data="pay_manager")]
     ])
 
     await callback.message.answer("💳 Выберите способ оплаты:", reply_markup=payment_kb)
@@ -1471,6 +1370,169 @@ async def process_online_payment(message: Message, state: FSMContext):
 
     # Сохраняем итоговую сумму в state
     await state.update_data(payment_amount=total, bonus_used=bonus_used)
+
+
+@router.callback_query(F.data.in_(["pay_online", "pay_sbp"]))
+async def process_online_payment_selection(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора онлайн-оплаты (карта или СБП)"""
+    payment_method = callback.data.split("_")[1]  # online или sbp
+    await state.update_data(payment_method=payment_method)
+
+    # Получаем данные заказа
+    data = await state.get_data()
+    user_id = callback.from_user.id
+
+    # Рассчитываем итоговую сумму с учетом бонусов
+    calculation = await calculate_order_total_with_bonuses(
+        user_id,
+        data.get('delivery_cost', 0),
+        data.get('bonus_used', 0)
+    )
+
+    total_amount = calculation['final_total']
+
+    # Сохраняем итоговую сумму
+    await state.update_data(
+        payment_amount=total_amount,
+        products_total=calculation['products_total'],
+        bonus_used=data.get('bonus_used', 0)
+    )
+
+    # Создаем платеж в ЮKassa
+    cart_items = get_cart(user_id)
+
+    # Формируем метаданные для платежа
+    metadata = {
+        "user_id": user_id,
+        "name": data.get('name', ''),
+        "phone": data.get('phone', ''),
+        "address": data.get('address', ''),
+        "delivery_date": data.get('delivery_date', ''),
+        "delivery_time": data.get('delivery_time', ''),
+        "payment_method": payment_method,
+        "delivery_type": data.get('delivery_type', 'delivery'),
+        "delivery_cost": data.get('delivery_cost', 0),
+        "bonus_used": data.get('bonus_used', 0),
+        "cart_items": cart_items,
+        "type": "order"
+    }
+
+    # Упрощаем метаданные для YooKassa (ограничение на длину)
+    simplified_metadata = simplify_order_data(metadata)
+
+    # Создаем платеж
+    payment_description = f"Заказ цветов на {total_amount}₽"
+
+    payment = await payment_manager.create_payment(
+        amount=total_amount,
+        description=payment_description,
+        metadata=simplified_metadata
+    )
+
+    if payment and payment.get("confirmation_url"):
+        await state.update_data(
+            payment_id=payment["id"],
+            payment_url=payment["confirmation_url"]
+        )
+        await state.set_state(OrderState.waiting_payment)
+
+        # Формируем клавиатуру с кнопкой оплаты
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment["confirmation_url"])],
+            [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_payment_{payment['id']}")]
+        ])
+
+        payment_method_name = "банковской картой" if payment_method == "online" else "через СБП"
+
+        await callback.message.answer(
+            f"💳 <b>Оплата {payment_method_name}</b>\n\n"
+            f"💰 Сумма к оплате: {total_amount} ₽\n"
+            f"🔗 Перейдите по ссылке для завершения оплаты\n\n"
+            f"После успешной оплаты нажмите «✅ Проверить оплату»",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.answer(
+            "❌ Не удалось создать платеж. Пожалуйста, попробуйте другой способ оплаты или свяжитесь с менеджером."
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("check_payment_"))
+async def check_payment_status(callback: CallbackQuery, state: FSMContext):
+    """Проверка статуса платежа"""
+    payment_id = callback.data.split("_")[2]
+
+    # Проверяем статус через payment_manager
+    status = await payment_manager.check_payment_status(payment_id)
+
+    if status == 'succeeded':
+        # Платеж успешен - создаем заказ
+        data = await state.get_data()
+        user_id = callback.from_user.id
+
+        # Создаем заказ
+        order_id = create_order(
+            user_id=user_id,
+            name=data.get('name', ''),
+            phone=data.get('phone', ''),
+            address=data.get('address', ''),
+            delivery_date=data.get('delivery_date', ''),
+            delivery_time=data.get('delivery_time', ''),
+            payment=data.get('payment_method', 'online'),
+            delivery_cost=data.get('delivery_cost', 0),
+            delivery_type=data.get('delivery_type', 'delivery'),
+            bonus_used=data.get('bonus_used', 0)
+        )
+
+        if order_id != -1:
+            await callback.message.answer(
+                f"✅ <b>Оплата принята!</b>\n\n"
+                f"Заказ #{order_id} успешно оформлен.\n"
+                f"Менеджер свяжется с вами для подтверждения.",
+                parse_mode="HTML"
+            )
+
+            # Отправляем уведомление администраторам
+            await notify_admins_about_new_order(order_id, user_id, data)
+
+            await state.clear()
+        else:
+            await callback.message.answer(
+                "❌ Ошибка при создании заказа. Пожалуйста, свяжитесь с менеджером."
+            )
+
+    elif status == 'pending':
+        await callback.answer("⏳ Платеж еще обрабатывается. Попробуйте через минуту.")
+    else:
+        await callback.answer("❌ Платеж не прошел. Попробуйте еще раз или выберите другой способ оплаты.")
+
+
+async def notify_admins_about_new_order(order_id: int, user_id: int, order_data: dict):
+    """Уведомление администраторов о новом заказе"""
+    cart_items = get_cart(user_id)
+
+    message = (
+        f"🛒 <b>НОВЫЙ ЗАКАЗ #{order_id}</b>\n\n"
+        f"👤 <b>Клиент:</b> {order_data.get('name', 'Не указано')}\n"
+        f"📞 <b>Телефон:</b> {order_data.get('phone', 'Не указан')}\n"
+        f"📍 <b>Адрес:</b> {order_data.get('address', 'Не указан')}\n"
+        f"📅 <b>Дата доставки:</b> {order_data.get('delivery_date', 'Не указана')}\n"
+        f"⏰ <b>Время:</b> {order_data.get('delivery_time', 'Не указано')}\n"
+        f"💳 <b>Способ оплаты:</b> {get_payment_method_name(order_data.get('payment_method', ''))}\n"
+        f"💰 <b>Сумма:</b> {order_data.get('payment_amount', 0)} ₽\n\n"
+        f"🛒 <b>Товары:</b>\n"
+    )
+
+    for item in cart_items:
+        message += f"• {item['name']} ×{item['quantity']} - {item['price'] * item['quantity']} ₽\n"
+
+    if order_data.get('bonus_used', 0) > 0:
+        message += f"\n💎 <b>Использовано бонусов:</b> {order_data.get('bonus_used', 0)} ₽"
+
+    await notify_admins(message)
 
 
 @router.callback_query(F.data.in_(["pay_online", "pay_sbp", "pay_cash"]))
@@ -1868,38 +1930,6 @@ async def process_manager_payment(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-async def show_order_summary_from_message(callback: CallbackQuery, state: FSMContext, total: float):
-    """Показывает сводку заказа и кнопку подтверждения"""
-    data = await state.get_data()
-
-    delivery_type = data.get('delivery_type', 'delivery')
-    delivery_type_text = "Самовывоз" if delivery_type == "pickup" else "Доставка"
-
-    # Безопасное получение адреса
-    address = data.get('address', '')
-    address_text = f"🏠 <b>Адрес:</b> {address}\n" if delivery_type == "delivery" and address else ""
-
-    order_summary = (
-        "📋 <b>Сводка заказа</b>\n\n"
-        f"👤 <b>Имя:</b> {data.get('name', 'Не указано')}\n"
-        f"📞 <b>Телефон:</b> {data.get('phone', 'Не указан')}\n"
-        f"📍 <b>Способ:</b> {delivery_type_text}\n"
-        f"{address_text}"
-        f"📅 <b>Дата:</b> {data.get('delivery_date', 'Не указана')}\n"
-        f"⏰ <b>Время:</b> {data.get('delivery_time', 'Не указано')}\n"
-        f"💳 <b>Оплата:</b> {get_payment_method_name(data.get('payment_method', ''))}\n\n"
-        f"💰 <b>Итого: {total} ₽</b>\n\n"
-        "✅ Все верно? Подтвердите заказ:"
-    )
-
-    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить заказ", callback_data="confirm_order")],
-        [InlineKeyboardButton(text="✏️ Изменить данные", callback_data="cancel_order")]
-    ])
-
-    await callback.message.answer(order_summary, reply_markup=confirm_kb, parse_mode="HTML")
-
-
 @router.callback_query(F.data == "check_payment_status")
 async def check_user_payment_status(callback: CallbackQuery, state: FSMContext):
     """Проверка статуса платежа пользователем"""
@@ -1974,6 +2004,38 @@ async def check_pending_payments():
             await asyncio.sleep(60)  # Ждем минуту при ошибке
 
 
+async def show_order_summary_from_message(callback: CallbackQuery, state: FSMContext, total: float):
+    """Показывает сводку заказа и кнопку подтверждения"""
+    data = await state.get_data()
+
+    delivery_type = data.get('delivery_type', 'delivery')
+    delivery_type_text = "Самовывоз" if delivery_type == "pickup" else "Доставка"
+
+    # Безопасное получение адреса
+    address = data.get('address', '')
+    address_text = f"🏠 <b>Адрес:</b> {address}\n" if delivery_type == "delivery" and address else ""
+
+    order_summary = (
+        "📋 <b>Сводка заказа</b>\n\n"
+        f"👤 <b>Имя:</b> {data.get('name', 'Не указано')}\n"
+        f"📞 <b>Телефон:</b> {data.get('phone', 'Не указан')}\n"
+        f"📍 <b>Способ:</b> {delivery_type_text}\n"
+        f"{address_text}"
+        f"📅 <b>Дата:</b> {data.get('delivery_date', 'Не указана')}\n"
+        f"⏰ <b>Время:</b> {data.get('delivery_time', 'Не указано')}\n"
+        f"💳 <b>Оплата:</b> {get_payment_method_name(data.get('payment_method', ''))}\n\n"
+        f"💰 <b>Итого: {total} ₽</b>\n\n"
+        "✅ Все верно? Подтвердите заказ:"
+    )
+
+    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить заказ", callback_data="confirm_order")],
+        [InlineKeyboardButton(text="✏️ Изменить данные", callback_data="cancel_order")]
+    ])
+
+    await callback.message.answer(order_summary, reply_markup=confirm_kb, parse_mode="HTML")
+
+
 @router.callback_query(F.data == "confirm_order")
 async def confirm_order(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -2034,18 +2096,6 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.answer()
-
-
-@router.message(Command("clear_my_cart"))
-async def clear_my_cart_command(message: Message):
-    """Очистка корзины пользователя"""
-    user_id = message.from_user.id
-    success = clear_cart(user_id)
-
-    if success:
-        await message.answer("✅ Корзина очищена!")
-    else:
-        await message.answer("❌ Не удалось очистить корзину")
 
 
 # --- YOOKASSA ---
@@ -2371,6 +2421,7 @@ async def ask_bonus_amount(callback: CallbackQuery, state: FSMContext):
     )
 
 
+# Добавьте этот обработчик после других payment обработчиков
 @router.callback_query(F.data.in_(["pay_online", "pay_sbp", "pay_cash"]))
 async def ask_about_bonus_usage(callback: CallbackQuery, state: FSMContext):
     """Спрашиваем, хочет ли пользователь использовать бонусы"""
@@ -2953,7 +3004,7 @@ async def show_all_reviews(callback: CallbackQuery):
     for i, review in enumerate(reviews[:10], 1):  # Показываем первые 10
         stars = "⭐" * min(5, max(1, review.get('rating', 5)))
         created_at = review['created_at'].split(".")[0] if isinstance(review['created_at'], str) else \
-        str(review['created_at']).split(".")[0]
+            str(review['created_at']).split(".")[0]
 
         review_text += (
             f"{stars}\n"
@@ -3125,7 +3176,6 @@ async def mark_delivered(message: Message):
     await message.answer(f"✅ Заказ #{last_order['id']} помечен как доставленный")
 
 
-
 @router.message(Command("add"))
 async def add_bouquet_cmd(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):  # Проверяем всех админов
@@ -3228,7 +3278,8 @@ async def show_my_id(message: Message):
 
     await message.answer(
         f"🆔 <b>Ваш ID:</b> <code>{user_id}</code>\n"
-        f"👑 <b>Статус администратора:</b> {'✅ Да' if is_user_admin else '❌ Нет'}",
+        f"👑 <b>Статус администратора:</b> {'✅ Да' if is_user_admin else '❌ Нет'}\n\n"
+        f"Чтобы добавить администратора, добавьте этот ID в config.py",
         parse_mode="HTML"
     )
 
@@ -3252,7 +3303,6 @@ async def auto_cleanup_daily_products():
         except Exception as e:
             logger.error(f"Ошибка в auto_cleanup_daily_products: {e}")
             await asyncio.sleep(3600)
-
 
 
 @router.callback_query(F.data == "test_create_order")
@@ -3474,17 +3524,3 @@ def can_use_bonus(user_id: int, bonus_amount: int, cart_items: List[Dict] = None
         'max_allowed': max_bonus_allowed,
         'products_total': products_total
     }
-
-@router.message(Command("test_cert"))
-async def test_certificate_command(message: Message):
-    """Быстрая команда для тестирования сертификата"""
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Тест сертификата (1 рубль)", callback_data="cert_1")]
-    ])
-
-    await message.answer(
-        "🔧 <b>Тестирование сертификата</b>\n\n"
-        "Нажмите кнопку для покупки тестового сертификата за 1 рубль:",
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
