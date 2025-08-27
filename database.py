@@ -28,6 +28,7 @@ def init_db():
                 photo TEXT,
                 category TEXT NOT NULL,
                 created_date DATE DEFAULT CURRENT_DATE,
+                created_by INTEGER,
                 is_daily BOOLEAN DEFAULT TRUE,
                 on_request BOOLEAN DEFAULT FALSE,
                 in_stock BOOLEAN DEFAULT TRUE

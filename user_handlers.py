@@ -79,6 +79,10 @@ class BudgetRequestState(StatesGroup):
     preferences = State()
 
 
+class AdminEditPrice(StatesGroup):
+    waiting_for_price = State()
+
+
 try:
     from yookassa import Payment
 except ImportError:
@@ -2895,6 +2899,7 @@ async def help_command(message: Message):
             "• /myid - Показать мой ID\n"
             "• /clear_my_cart - Очистить корзину\n"
             "• /reset_bonus - Сбросить бонусы\n"
+            "• /pending_prices - Изменить цену, который по запросу\n"
 
             "📊 <b>Управление через кнопки:</b>\n"
             "• 📦 Управление заказами\n"
@@ -3547,6 +3552,54 @@ async def process_admin_budget(message: Message, state: FSMContext):
     await state.clear()
 
 
+@router.message(AdminEditPrice.waiting_for_price)
+async def process_new_price(message: Message, state: FSMContext):
+    try:
+        new_price = float(message.text)
+        if new_price < 0:
+            await message.answer("❌ Цена не может быть отрицательной.")
+            return
+
+        data = await state.get_data()
+        product_id = data['product_id']
+
+        # Обновляем цену и снимаем флаг on_request
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE products 
+                SET price = ?, on_request = FALSE 
+                WHERE id = ?
+            """, (new_price, product_id))
+            conn.commit()
+
+        # Получаем обновлённый товар
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM products WHERE id = ?", (product_id,))
+            product = cur.fetchone()
+
+        await message.answer(
+            f"✅ Цена установлена!\n"
+            f"📦 <b>{product['name']}</b>\n"
+            f"💰 <b>{new_price} ₽</b>",
+            parse_mode="HTML"
+        )
+
+        # Оповещаем админа, что можно обновить список
+        await message.answer("📌 Обновите список: /pending_prices")
+
+        await state.clear()
+
+    except ValueError:
+        await message.answer("❌ Введите число. Например: 2800")
+    except Exception as e:
+        logger.error(f"Ошибка при установке цены: {e}")
+        await message.answer("❌ Ошибка при сохранении.")
+        await state.clear()
+
+
 @router.message(Command("myid"))
 async def show_my_id(message: Message):
     """Показывает ID пользователя (удобно для добавления админов)"""
@@ -3759,6 +3812,119 @@ async def reset_bonus(message: Message):
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
+
+
+@router.message(Command("edit_price"))
+async def edit_price_cmd(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Доступ запрещён.")
+        return
+
+    try:
+        # Получаем ID товара из команды: /edit_price 123
+        args = message.text.split()
+        if len(args) != 2:
+            await message.answer("📌 Использование: <code>/edit_price <id_товара></code>", parse_mode="HTML")
+            return
+
+        product_id = int(args[1])
+
+        # Проверяем, существует ли товар и цена либо 0, либо on_request=True
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM products WHERE id = ?", (product_id,))
+            product = cur.fetchone()
+
+        if not product:
+            await message.answer("❌ Товар не найден.")
+            return
+
+        if product['price'] > 0 and not product['on_request']:
+            await message.answer(f"✅ У товара «{product['name']}» уже установлена цена: {product['price']} ₽\n"
+                                 "Редактировать можно только товары с ценой 'по запросу'.")
+            return
+
+        await state.update_data(product_id=product_id)
+        await message.answer(
+            f"🔧 Редактирование цены для товара:\n"
+            f"📦 <b>{product['name']}</b>\n"
+            f"📝 {product['description']}\n\n"
+            f"Введите новую цену в рублях (только число):",
+            parse_mode="HTML"
+        )
+        await state.set_state(AdminEditPrice.waiting_for_price)
+
+    except ValueError:
+        await message.answer("❌ Неверный формат ID. Используйте число.")
+    except Exception as e:
+        logger.error(f"Ошибка в /edit_price: {e}")
+        await message.answer("❌ Ошибка при обработке команды.")
+
+
+@router.message(Command("pending_prices"))
+async def show_pending_products(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Доступ запрещён.")
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, description, photo, created_date
+            FROM products
+            WHERE (price = 0 OR on_request = TRUE)
+            AND is_daily = TRUE
+            ORDER BY created_date DESC
+        """)
+        products = [dict(row) for row in cur.fetchall()]
+
+    if not products:
+        await message.answer("🟢 Нет товаров с ценой 'по запросу'.")
+        return
+
+    for product in products:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Установить цену", callback_data=f"set_price_{product['id']}")],
+            [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_product_{product['id']}")]
+        ])
+        await message.answer_photo(
+            photo=FSInputFile(product['photo']),
+            caption=f"🟡 <b>Товар без цены:</b>\n"
+                    f"📦 <b>{product['name']}</b>\n"
+                    f"📝 {product['description']}\n"
+                    f"🆔 <code>{product['id']}</code>",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data.startswith("set_price_"))
+async def start_set_price(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Доступ запрещён.")
+        return
+
+    product_id = int(callback.data.split("_")[2])
+
+    # Проверяем, существует ли товар
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM products WHERE id = ?", (product_id,))
+        product = cur.fetchone()
+
+    if not product:
+        await callback.answer("❌ Товар не найден.")
+        return
+
+    await state.update_data(product_id=product_id)
+    await callback.message.answer(
+        f"🔧 Введите новую цену для товара «{product['name']}» (в рублях):"
+    )
+    await state.set_state(AdminEditPrice.waiting_for_price)
+    await callback.answer()
 
 
 def calculate_order_with_bonus(user_id: int, delivery_cost: int, bonus_to_use: int = 0) -> dict:
