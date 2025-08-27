@@ -29,6 +29,7 @@ def init_db():
                 category TEXT NOT NULL,
                 created_date DATE DEFAULT CURRENT_DATE,
                 is_daily BOOLEAN DEFAULT TRUE,
+                on_request BOOLEAN DEFAULT FALSE,
                 in_stock BOOLEAN DEFAULT TRUE
             )
             """,
@@ -504,14 +505,14 @@ def add_bonus_points(user_id: int, order_id: int, total_amount: float):
 
 
 def add_product(name: str, description: str, full_description: str, price: float,
-                photo: str, category: str, is_daily: bool = True) -> int:
-    """Добавляет товар в базу (для букетов дня is_daily=True)"""
+                photo: str, category: str, is_daily: bool = True, on_request: bool = False) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO products (name, description, full_description, price, photo, category, is_daily)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (name, description, full_description, price, photo, category, is_daily))
+            INSERT INTO products 
+            (name, description, full_description, price, photo, category, is_daily, on_request)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, description, full_description, price, photo, category, is_daily, on_request))
         conn.commit()
         return cur.lastrowid
 

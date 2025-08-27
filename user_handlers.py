@@ -71,6 +71,8 @@ class AdminState(StatesGroup):
     price = State()
     category = State()
     photo = State()
+    budget = State()
+
 
 class BudgetRequestState(StatesGroup):
     budget = State()
@@ -262,7 +264,7 @@ async def show_bouquets(message: Message):
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")],
-            [InlineKeyboardButton(text="💰 Подбор под бюджет", callback_data="budget_selection")]  # Новая кнопка
+            [InlineKeyboardButton(text="💰 Подбор под бюджет", callback_data="budget_selection")]
         ])
 
         if not bouquets:
@@ -284,7 +286,11 @@ async def show_bouquets(message: Message):
         )
 
         for bouquet in bouquets:
-            text = f"<b>{bouquet['name']}</b>\n{bouquet['description']}\n💰 <b>Цена: {bouquet['price']} ₽</b>"
+            text = f"<b>{bouquet['name']}</b>\n{bouquet['description']}\n"
+            if bouquet['on_request'] or bouquet['price'] == 0:
+                text += "💰 <b>Цена: по запросу</b>"
+            else:
+                text += f"💰 <b>Цена: {bouquet['price']} ₽</b>"
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📖 Подробнее", callback_data=f"details_{bouquet['id']}")],
                 [InlineKeyboardButton(text="🛒 В корзину", callback_data=f"add_{bouquet['id']}")]
@@ -320,10 +326,13 @@ async def show_plants(message: Message):
             """)
             plants = [dict(row) for row in cur.fetchall()]
 
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")],
+        ])
         if not plants:
             await message.answer(
                 "🌿 <b>Горшечные растения временно отсутствуют!</b>\n\n"
-                "Свяжитесь с менеджером для уточнения наличия.",
+                "Свяжитесь с менеджером для уточнения наличия.", reply_markup=kb,
                 parse_mode="HTML"
             )
             return
@@ -335,9 +344,14 @@ async def show_plants(message: Message):
         )
 
         for plant in plants:
-            text = f"<b>{plant['name']}</b>\n{plant['description']}\n💰 <b>Цена: {plant['price']} ₽</b>"
+            text = f"<b>{plant['name']}</b>\n{plant['description']}\n"
+            if plant['on_request'] or plant['price'] == 0:
+                text += "💰 <b>Цена: по запросу</b>"
+            else:
+                text += f"💰 <b>Цена: {plant['price']} ₽</b>"
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📖 Подробнее", callback_data=f"details_{plant['id']}")],
+                [InlineKeyboardButton(text="💬 Уточнить цену", url="https://t.me/mgk71")],
                 [InlineKeyboardButton(text="🛒 В корзину", callback_data=f"add_{plant['id']}")]
             ])
 
@@ -1178,6 +1192,7 @@ async def budget_keyword_handler(message: Message, state: FSMContext):
     """Обработчик ключевого слова "бюджет" """
     await start_budget_selection_from_message(message, state)
 
+
 async def start_budget_selection_from_message(message: Message, state: FSMContext):
     """Запуск подбора по бюджету из текстового сообщения"""
     await message.answer(
@@ -1185,7 +1200,7 @@ async def start_budget_selection_from_message(message: Message, state: FSMContex
         "Не нашли подходящий букет? Мы поможем!\n\n"
         "💡 Наши флористы подберут идеальный вариант:\n"
         "• В рамках вашего бюджета\n"
-        "• С учетом ваших предпочтений\n" 
+        "• С учетом ваших предпочтений\n"
         "• Быстро и профессионально\n\n"
         "📝 Введите сумму вашего бюджета (в рублях):",
         parse_mode="HTML"
@@ -2899,7 +2914,6 @@ async def help_command(message: Message):
 
             "📱 <b>Основное меню:</b>\n"
             "• 🌸 Каталог - Просмотр товаров\n"
-            "• 💰 Подбор под бюджет - Менеджер подберет букет под ваш запрос и бюджет\n"
             "• 🚚 Доставка - Условия доставки\n"
             "• 📞 Менеджер - Связь с менеджером\n"
             "• 📍 На карте - Адрес магазина\n"
@@ -3372,26 +3386,164 @@ async def get_bouquet_full_desc(message: Message, state: FSMContext):
 
 @router.message(AdminState.price)
 async def get_bouquet_price(message: Message, state: FSMContext):
-    try:
-        price = float(message.text)
-    except ValueError:
-        await message.answer("❌ Введите число, например: 1500")
-        return
+    price_text = message.text.strip().lower()
 
+    # Проверяем, является ли ввод числом
+    try:
+        price = float(price_text)
+        # Если это число - сохраняем как обычно
+        data = await state.get_data()
+
+        product_id = add_product(
+            name=data['name'],
+            description=data['description'],
+            full_description=data['full_description'],
+            price=price,
+            photo=data.get('photo'),
+            category=data['category'],
+            is_daily=True
+        )
+
+        await message.answer(f"✅ Букет «{data['name']}» добавлен как букет дня! Цена: {price} ₽")
+        await state.clear()
+
+
+    except ValueError:
+        # Если цена — не число, например "по запросу"
+        data = await state.get_data()
+        name = data['name']
+        category = data['category']
+        description = data.get('description', 'Нет описания')
+        full_description = data.get('full_description', description)
+        photo_path = data.get('photo')
+
+        # Сохраняем товар с меткой "по запросу"
+        product_id = add_product(
+            name=name,
+            description=description,
+            full_description=full_description,
+            price=0,  # или None, если поддерживается
+            photo=photo_path,
+            category=category,
+            is_daily=True,
+            on_request=True  # или добавь в запрос: DEFAULT FALSE
+        )
+
+        # Уведомляем, что товар добавлен, но цена по запросу
+        await message.answer(
+            f"✅ Товар «{name}» добавлен в каталог как 'по запросу'.\n"
+            f"💬 Клиенты смогут уточнить цену у менеджера.",
+            parse_mode="HTML"
+        )
+
+        # Оповещаем админов, что новый товар ожидает цену
+        admin_msg = (
+            "🟡 <b>НОВЫЙ ТОВАР 'ПО ЗАПРОСУ'</b>\n"
+            f"👤 <b>Флорист:</b> {message.from_user.full_name}\n"
+            f"🌸 <b>Товар:</b> {name}\n"
+            f"📝 <b>Описание:</b> {description}\n"
+            f"⚠️ <b>Требуется утвердить цену вручную.</b>"
+        )
+
+        await notify_admins(admin_msg)
+
+        await state.clear()
+
+
+@router.callback_query(F.data == "ask_manager_price")
+async def ask_manager_for_price(callback: CallbackQuery, state: FSMContext):
+    """Запрос цены у менеджера"""
     data = await state.get_data()
 
-    # Сохраняем в БД как букет дня
-    product_id = add_product(
-        name=data['name'],
-        description=data['description'],
-        full_description=data['full_description'],
-        price=price,
-        photo=data.get('photo'),
-        category=data['category'],
-        is_daily=True  # Это букет дня!
+    # Формируем сообщение для менеджера
+    admin_msg = (
+        "💰 <b>ЗАПРОС ЦЕНЫ ОТ ФЛОРИСТА</b>\n\n"
+        f"👤 <b>Флорист:</b> {callback.from_user.full_name}\n"
+        f"🆔 <b>ID:</b> {callback.from_user.id}\n\n"
+        f"🌸 <b>Букет:</b> {data['name']}\n"
+        f"📝 <b>Описание:</b> {data['description']}\n"
+        f"💬 <b>Предполагаемая цена:</b> {data.get('price_text', 'не указана')}\n\n"
+        f"⚠️ <b>Требуется уточнить точную цену!</b>"
     )
 
-    await message.answer(f"✅ Букет «{data['name']}» добавлен как букет дня!")
+    try:
+        await notify_admins(admin_msg)
+        await callback.message.answer(
+            "✅ Запрос отправлен менеджеру!\n"
+            "Менеджер свяжется с вами для уточнения точной цены."
+        )
+    except Exception as e:
+        await callback.message.answer(
+            "❌ Ошибка при отправке запроса. "
+            "Пожалуйста, свяжитесь с менеджером самостоятельно: @mgk71"
+        )
+
+    await state.clear()
+    await callback.answer()
+
+
+@router.callback_query(F.data == "budget_selection_admin")
+async def budget_selection_admin(callback: CallbackQuery, state: FSMContext):
+    """Подбор цены под бюджет для админа"""
+    data = await state.get_data()
+    await state.update_data(admin_product_data=data)  # Сохраняем данные товара
+
+    await callback.message.answer(
+        "💰 <b>Подбор цены под бюджет</b>\n\n"
+        "Введите предполагаемый бюджет для этого букета (в рублях):",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminState.budget)
+
+
+@router.callback_query(F.data == "cancel_add_product")
+async def cancel_add_product(callback: CallbackQuery, state: FSMContext):
+    """Отмена добавления товара"""
+    await state.clear()
+    await callback.message.answer("❌ Добавление товара отменено.")
+    await callback.answer()
+
+
+@router.message(AdminState.budget)
+async def process_admin_budget(message: Message, state: FSMContext):
+    """Обработка бюджета от админа"""
+    try:
+        budget = float(message.text)
+        data = await state.get_data()
+        product_data = data['admin_product_data']
+
+        # Используем бюджет как примерную цену
+        product_id = add_product(
+            name=product_data['name'],
+            description=product_data['description'],
+            full_description=product_data['full_description'],
+            price=budget,
+            photo=product_data.get('photo'),
+            category=product_data['category'],
+            is_daily=True
+        )
+
+        await message.answer(
+            f"✅ Букет «{product_data['name']}» добавлен с примерной ценой {budget} ₽\n\n"
+            f"💡 <i>Цена будет уточнена менеджером перед продажей</i>",
+            parse_mode="HTML"
+        )
+
+        # Уведомляем менеджера
+        admin_msg = (
+            "💰 <b>БУКЕТ ДОБАВЛЕН С ПРИМЕРНОЙ ЦЕНОЙ</b>\n\n"
+            f"👤 <b>Флорист:</b> {message.from_user.full_name}\n"
+            f"🌸 <b>Букет:</b> {product_data['name']}\n"
+            f"💵 <b>Примерная цена:</b> {budget} ₽\n"
+            f"📝 <b>Описание:</b> {product_data['description']}\n\n"
+            f"⚠️ <b>Требуется утвердить окончательную цену!</b>"
+        )
+        await notify_admins(admin_msg)
+
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите число. Например: 2500")
+        return
+
     await state.clear()
 
 
