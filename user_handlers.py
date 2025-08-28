@@ -268,7 +268,7 @@ async def show_bouquets(message: Message):
             bouquets = [dict(row) for row in cur.fetchall()]
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")],
+            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/Therry_Voyager")],
             [InlineKeyboardButton(text="💰 Подбор под бюджет", callback_data="budget_selection")]
         ])
 
@@ -332,7 +332,7 @@ async def show_plants(message: Message):
             plants = [dict(row) for row in cur.fetchall()]
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")],
+            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/Therry_Voyager")],
         ])
         if not plants:
             await message.answer(
@@ -356,7 +356,7 @@ async def show_plants(message: Message):
                 text += f"💰 <b>Цена: {plant['price']} ₽</b>"
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📖 Подробнее", callback_data=f"details_{plant['id']}")],
-                [InlineKeyboardButton(text="💬 Уточнить цену", url="https://t.me/mgk71")],
+                [InlineKeyboardButton(text="💬 Уточнить цену", url="https://t.me/Therry_Voyager")],
                 [InlineKeyboardButton(text="🛒 В корзину", callback_data=f"add_{plant['id']}")]
             ])
 
@@ -394,7 +394,7 @@ async def show_details(callback: CallbackQuery):
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🛒 Добавить в корзину", callback_data=f"add_{product['id']}")],
-            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]
+            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/Therry_Voyager")]
         ])
 
         if product['photo'] and os.path.exists(product['photo']):
@@ -426,7 +426,7 @@ async def delivery_info(message: Message):
         [InlineKeyboardButton(text="🚗 Условия доставки", callback_data="delivery_conditions")],
         [InlineKeyboardButton(text="💳 Способы оплаты", callback_data="payment_methods")],
         [InlineKeyboardButton(text="📦 Самовывоз", callback_data="pickup_info")],
-        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]
+        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/Therry_Voyager")]
     ])
     # Сообщение можно сделать более соответствующим ТЗ
     await message.answer(
@@ -454,7 +454,7 @@ async def show_delivery_info(callback: CallbackQuery):
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]
+        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/Therry_Voyager")]
     ])
 
     await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
@@ -478,7 +478,7 @@ async def show_payment_info(callback: CallbackQuery):
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]
+        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/Therry_Voyager")]
     ])
 
     await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
@@ -1097,7 +1097,7 @@ async def add_to_cart_handler(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("check_avail_"))
 async def check_availability_product(callback: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]])
+        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/Therry_Voyager")]])
     text = f"📞 Свяжитесь с менеджером, чтобы узнать о наличии товара"
     await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
 
@@ -2287,7 +2287,7 @@ async def create_yookassa_payment(callback: CallbackQuery, state: FSMContext):
             "amount": {"value": str(total), "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                "return_url": "https://t.me/mgk71"
+                "return_url": "https://t.me/Therry_Voyager"
             },
             "capture": True,
             "description": f"Заказ #{payment_id}",

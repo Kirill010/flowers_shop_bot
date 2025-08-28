@@ -49,7 +49,7 @@ async def create_certificate_payment(user_id: int, amount: int, callback: Callba
             "amount": {"value": str(amount), "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                "return_url": "https://t.me/mgk71_bot"  # URL вашего бота
+                "return_url": "https://t.me/flowersstories_bot"  # URL вашего бота
             },
             "capture": True,
             "description": f"Подарочный сертификат на {amount}₽",

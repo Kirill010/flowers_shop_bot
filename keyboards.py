@@ -49,7 +49,7 @@ def details_keyboard(product_id: int):
         inline_keyboard=[
             [InlineKeyboardButton(text="🛒 Добавить в корзину", callback_data=f"add_{product_id}")],
             [InlineKeyboardButton(text="📞 Уточнить наличие", callback_data=f"check_avail_{product_id}")],
-            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")],
+            [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/Therry_Voyager")],
             [InlineKeyboardButton(text="⬅️ Назад к товарам", callback_data="back_to_products")]
         ]
     )
@@ -74,7 +74,7 @@ def delivery_keyboard():
             [InlineKeyboardButton(text="💳 Способы оплаты", callback_data="payment_methods")],
             [InlineKeyboardButton(text="📦 Самовывоз", callback_data="pickup_info")],
             [InlineKeyboardButton(text="⏰ Сроки доставки", callback_data="delivery_times")],
-            [InlineKeyboardButton(text="💬 Спросите у менеджера", url="https://t.me/mgk71")]
+            [InlineKeyboardButton(text="💬 Спросите у менеджера", url="https://t.me/Therry_Voyager")]
         ]
     )
 

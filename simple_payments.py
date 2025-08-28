@@ -27,7 +27,7 @@ class SimplePaymentManager:
                     },
                     "confirmation": {
                         "type": "redirect",
-                        "return_url": "https://t.me/mgk71"
+                        "return_url": "https://t.me/Therry_Voyager"
                     },
                     "capture": True,
                     "description": description,
