@@ -51,3 +51,4 @@ Path("certificates").mkdir(exist_ok=True)
 # /admin - все для админа
 # /myid - мой id
 # /clear_my_cart - корзина очищена
+# /test_cert - сертификат 1 рубль
