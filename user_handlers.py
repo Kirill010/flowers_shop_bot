@@ -3994,3 +3994,18 @@ def can_use_bonus(user_id: int, bonus_amount: int, cart_items: List[Dict] = None
         'max_allowed': max_bonus_allowed,
         'products_total': products_total
     }
+
+
+@router.message(Command("test_cert"))
+async def test_certificate_command(message: Message):
+    """Быстрая команда для тестирования сертификата"""
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎁 Тест сертификата (1 рубль)", callback_data="cert_1")]
+    ])
+
+    await message.answer(
+        "🔧 <b>Тестирование сертификата</b>\n\n"
+        "Нажмите кнопку для покупки тестового сертификата за 1 рубль:",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
