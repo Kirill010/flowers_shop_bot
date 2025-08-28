@@ -1251,6 +1251,7 @@ async def get_budget_amount(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ Пожалуйста, введите число. Например: 2000")
 
+
 @router.message(BudgetRequestState.phone)
 async def get_budget_phone(message: Message, state: FSMContext):
     """Получаем телефон пользователя"""
