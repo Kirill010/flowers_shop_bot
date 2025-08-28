@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 # Токен бота
-BOT_TOKEN = "8201157651:AAHIA7J5_NuRHhBmEEgB1H0vuXK4DnqBucI"
+BOT_TOKEN = "8486660245:AAHJ8i2aLQn9iXkB-WLeiB1B_sV2H8xtATQ"
 
 # ID администратора
 ADMIN_ID = 1095668090  # Главный админ
@@ -38,13 +38,9 @@ Path("data").mkdir(exist_ok=True)
 Path("ssl").mkdir(exist_ok=True)
 Path("certificates").mkdir(exist_ok=True)
 
-# rm -rf venv
-# python3.10 -m venv venv
-# source venv/bin/activate
-# pip install aiohttp_socks
-
-# /reset_bonus - сбросить бонусы
 # /add - Добавить товар
+# /update_catalog
+# /debug
 # /mark_delivered - Отметка доставок
 # /reviews_debug - Таблица отзывов
 # /start - Старт
@@ -52,3 +48,14 @@ Path("certificates").mkdir(exist_ok=True)
 # /myid - мой id
 # /clear_my_cart - корзина очищена
 # /test_cert - сертификат 1 рубль
+# /edit_price
+# /pending_prices
+# rm -rf venv
+# python3.10 -m venv venv
+# source venv/bin/activate
+# pip install aiohttp_socks
+
+# rm -rf venv
+# python3.10 -m venv venv
+# source venv/bin/activate
+# pip install aiohttp_socks
