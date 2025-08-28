@@ -76,6 +76,7 @@ class AdminState(StatesGroup):
 
 class BudgetRequestState(StatesGroup):
     budget = State()
+    phone = State()
     preferences = State()
 
 
@@ -1240,20 +1241,39 @@ async def get_budget_amount(message: Message, state: FSMContext):
 
         await state.update_data(budget=budget)
         await message.answer(
-            "🎨 <b>Расскажите о ваших предпочтениях</b>\n\n"
-            "Что бы вы хотели видеть в букете?\n\n"
-            "Например:\n"
-            "• Любимые цветы (розы, тюльпаны, хризантемы)\n"
-            "• Цветовая гамма (красный, белый, пастельные тона)\n"
-            "• Повод (день рождения, 8 марта, просто так)\n"
-            "• Особые пожелания\n\n"
-            "💬 Опишите кратко, что вам нравится:",
+            "📞 <b>Введите ваш номер телефона для связи:</b>\n\n"
+            "Менеджер свяжется с вами для уточнения деталей.\n"
+            "Формат: +7 XXX XXX XX XX",
             parse_mode="HTML"
         )
-        await state.set_state(BudgetRequestState.preferences)
+        await state.set_state(BudgetRequestState.phone)
 
     except ValueError:
         await message.answer("❌ Пожалуйста, введите число. Например: 2000")
+
+@router.message(BudgetRequestState.phone)
+async def get_budget_phone(message: Message, state: FSMContext):
+    """Получаем телефон пользователя"""
+    phone = message.text.strip()
+
+    # Простая валидация номера
+    if not phone.replace('+', '').replace(' ', '').replace('-', '').replace('(', '').replace(')', '').isdigit():
+        await message.answer("❌ Неверный формат телефона. Введите номер в формате +7 XXX XXX XX XX:")
+        return
+
+    await state.update_data(phone=phone)
+    await message.answer(
+        "🎨 <b>Расскажите о ваших предпочтениях</b>\n\n"
+        "Что бы вы хотели видеть в букете?\n\n"
+        "Например:\n"
+        "• Любимые цветы (розы, тюльпаны, хризантемы)\n"
+        "• Цветовая гамма (красный, белый, пастельные тона)\n"
+        "• Повод (день рождения, 8 марта, просто так)\n"
+        "• Особые пожелания\n\n"
+        "💬 Опишите кратко, что вам нравится:",
+        parse_mode="HTML"
+    )
+    await state.set_state(BudgetRequestState.preferences)
 
 
 @router.message(BudgetRequestState.preferences)
@@ -1262,18 +1282,24 @@ async def get_budget_preferences(message: Message, state: FSMContext):
     preferences = message.text
     data = await state.get_data()
     budget = data['budget']
+    phone = data['phone']  # Получаем телефон из state
 
-    # Формируем сообщение для менеджера
+    # Формируем сообщение для менеджера с номером телефона
     admin_message = (
         "💰 <b>НОВАЯ ЗАЯВКА: ПОДБОР ПОД БЮДЖЕТ</b>\n\n"
         f"👤 <b>Клиент:</b> {message.from_user.full_name}\n"
+        f"📞 <b>Телефон:</b> {phone}\n"  # Добавляем телефон
         f"🆔 <b>ID:</b> {message.from_user.id}\n"
         f"💵 <b>Бюджет:</b> {budget} ₽\n"
         f"🎨 <b>Предпочтения:</b>\n{preferences}\n\n"
         f"⚡ <b>СРОЧНО ОБРАБОТАТЬ!</b>"
     )
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Спросить у менеджера", url="https://t.me/mgk71")]])
+        [InlineKeyboardButton(text="💬 Написать клиенту",
+                              url=f"https://t.me/{message.from_user.username}" if message.from_user.username else
+                              f"tg://user?id={message.from_user.id}")]
+    ])
 
     # Отправляем всем админам
     try:
@@ -1281,16 +1307,16 @@ async def get_budget_preferences(message: Message, state: FSMContext):
         await message.answer(
             "✅ <b>Ваша заявка принята!</b>\n\n"
             f"💵 Бюджет: {budget} ₽\n"
+            f"📞 Телефон: {phone}\n"
             f"🎨 Ваши пожелания: {preferences}\n\n"
             "📞 Менеджер свяжется с вами в течение 15 минут "
-            "с вариантами букетов в рамках вашего бюджета!\n\n"
-            "💬 Если у вас срочный вопрос, напишите менеджеру", reply_markup=kb,
+            "с вариантами букетов в рамках вашего бюджета!",
             parse_mode="HTML"
         )
     except Exception as e:
         await message.answer(
             "❌ Произошла ошибка при отправке заявки. "
-            "Пожалуйста, напишите менеджеру", reply_markup=kb
+            "Пожалуйста, напишите менеджеру напрямую: @mgk71"
         )
         logger.error(f"Budget request error: {e}")
 
