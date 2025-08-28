@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 # Токен бота
-BOT_TOKEN = "8486660245:AAHJ8i2aLQn9iXkB-WLeiB1B_sV2H8xtATQ"
+BOT_TOKEN = "8201157651:AAHIA7J5_NuRHhBmEEgB1H0vuXK4DnqBucI"
 
 # ID администратора
 ADMIN_ID = 1095668090  # Главный админ
