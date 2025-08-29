@@ -3,7 +3,7 @@ import uuid
 import asyncio
 from typing import Optional
 import logging
-from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, IS_LOCAL, LOCAL_TUNNEL_URL
 import aiohttp
 import ssl
 
@@ -27,6 +27,10 @@ class SimplePaymentManager:
         for attempt in range(self.retry_attempts):
             try:
                 logger.info(f"🔄 Попытка {attempt + 1} создать платеж на {amount} руб.")
+
+                # Для локального тестирования используем упрощенный подход
+                if IS_LOCAL:
+                    return await self.create_local_payment(amount, description, metadata)
 
                 # --- НАЧАЛО: Добавляем чек (receipt) ---
                 # Пример email для чека (лучше — запросить у пользователя)
@@ -141,6 +145,31 @@ class SimplePaymentManager:
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay)
         return "succeeded"  # В случае ошибки считаем платеж успешным для тестирования
+
+    async def create_local_payment(self, amount: int, description: str, metadata: dict) -> dict:
+        """Создание тестового платежа для локальной разработки"""
+        try:
+            payment_id = f"test_{uuid.uuid4().hex[:8]}"
+
+            # Создаем тестовую страницу оплаты
+            test_payment_url = f"https://{LOCAL_TUNNEL_URL}/test_payment/{payment_id}"
+
+            return {
+                "id": payment_id,
+                "status": "pending",
+                "confirmation_url": test_payment_url,
+                "amount": amount,
+                "is_test": True  # Флаг тестового платежа
+            }
+        except Exception as e:
+            logger.error(f"Local payment creation failed: {e}")
+            return None
+
+    async def check_payment_status(self, payment_id: str) -> Optional[str]:
+        """Проверка статуса платежа"""
+        if payment_id.startswith("test_"):
+            # Для тестовых платежей всегда возвращаем успех
+            return "succeeded"
 
 
 payment_manager = SimplePaymentManager()

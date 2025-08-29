@@ -22,6 +22,17 @@ WEBHOOK_PATH = "/webhook/yookassa"
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBHOOK_SECRET = "your_webhook_secret_token"  # Сгенерируйте случайный токен
 
+IS_LOCAL = os.getenv("IS_LOCAL", "False").lower() == "true"
+LOCAL_TUNNEL_URL = "your-ngrok-url.ngrok.io"  # Замените на ваш ngrok URL
+
+if IS_LOCAL:
+    WEBHOOK_HOST = LOCAL_TUNNEL_URL
+else:
+    WEBHOOK_HOST = "yourdomain.com"  # Ваш продакшен домен
+
+WEBHOOK_PATH = "/webhook/yookassa"
+WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
 # Информация о магазине
 SHOP_INFO = {
     "name": "Цветочная лавка",

@@ -23,6 +23,9 @@ import asyncio
 import logging
 import random
 from datetime import datetime, timedelta
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
+from aiogram.filters import Command
 
 MAX_BONUS_PERCENTAGE = 0.3  # 30%
 BONUS_EARN_PERCENTAGE = 0.1  # 10%
@@ -41,6 +44,7 @@ MENU_COMMANDS = {
 }
 
 router = Router()
+test_router = Router()
 
 
 # --- FSM для оформления заказа ---
@@ -4073,3 +4077,37 @@ async def process_email(message: Message, state: FSMContext):
     ])
     await message.answer("📆 Выберите дату доставки:", reply_markup=kb)
     await state.set_state(OrderState.delivery_date)
+
+
+@test_router.message(Command("test_payment"))
+async def test_payment_page(message: Message):
+    """Тестовая страница оплаты"""
+    payment_id = message.text.split("/")[-1]
+
+    await message.answer(
+        f"🧪 <b>Тестовая страница оплаты</b>\n\n"
+        f"ID платежа: {payment_id}\n"
+        f"Это тестовая страница для локальной разработки.\n\n"
+        f"Нажмите кнопку ниже чтобы симулировать успешную оплату:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Оплатить", callback_data=f"confirm_test_payment_{payment_id}")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data=f"cancel_test_payment_{payment_id}")]
+        ])
+    )
+
+
+@test_router.callback_query(F.data.startswith("confirm_test_payment_"))
+async def confirm_test_payment(callback: CallbackQuery):
+    """Подтверждение тестовой оплаты"""
+    payment_id = callback.data.split("_")[-1]
+
+    # Здесь можно обновить статус платежа в базе данных
+    update_payment_status(payment_id, "succeeded")
+
+    await callback.message.edit_text(
+        "✅ <b>Оплата прошла успешно!</b>\n\n"
+        "Это была тестовая транзакция для разработки.",
+        parse_mode="HTML"
+    )
+    await callback.answer()
