@@ -680,7 +680,7 @@ async def handle_certificate_purchase(callback: CallbackQuery, state: FSMContext
     try:
         amount = int(amount_str)
 
-        # Проверка минимальной суммы для ЮKassa (минимум 1 рубль)
+        # Проверка минимальной суммы для ЮKassa
         if amount < 1:
             await callback.answer("❌ Минимальная сумма - 1 рубль")
             return
@@ -734,6 +734,9 @@ async def handle_certificate_purchase(callback: CallbackQuery, state: FSMContext
 
     except ValueError:
         await callback.answer("❌ Неверный номинал сертификата")
+    except Exception as e:
+        logger.error(f"Ошибка создания платежа сертификата: {e}")
+        await callback.message.answer("❌ Ошибка при создании платежа")
 
     await callback.answer()
 
@@ -754,64 +757,60 @@ async def handle_certificate_selection(callback: CallbackQuery, state: FSMContex
     await callback.answer()
 
 
-# async def create_certificate_payment(user_id: int, amount: int, callback: CallbackQuery, state: FSMContext):
-#     """Создание платежа для сертификата"""
-#     cert_code = f"CERT-{uuid.uuid4().hex[:8].upper()}"
-#
-#     try:
-#         # Настройка ЮKassa
-#         Configuration.account_id = YOOKASSA_SHOP_ID
-#         Configuration.secret_key = YOOKASSA_SECRET_KEY
-#
-#         # Создаем реальный платеж
-#         payment_id = str(uuid.uuid4())
-#         payment = Payment.create({
-#             "amount": {"value": str(amount), "currency": "RUB"},
-#             "confirmation": {
-#                 "type": "redirect",
-#                 "return_url": "https://t.me/flowersstories_bot"  # URL бота
-#             },
-#             "capture": True,
-#             "description": f"Подарочный сертификат на {amount}₽",
-#             "metadata": {
-#                 "user_id": user_id,
-#                 "cert_code": cert_code,
-#                 "type": "certificate"
-#             }
-#         }, idempotency_key=payment_id)
-#
-#         await state.update_data(
-#             payment_id=payment.id,
-#             cert_amount=amount,
-#             cert_code=cert_code,
-#             payment_url=payment.confirmation.confirmation_url
-#         )
-#         await state.set_state(CertificateState.waiting_payment)
-#
-#         kb = InlineKeyboardMarkup(inline_keyboard=[
-#             [InlineKeyboardButton(text="💳 Оплатить сертификат", url=payment.confirmation.confirmation_url)],
-#             [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_cert_payment_{payment.id}")]
-#         ])
-#
-#         await callback.message.answer(
-#             f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
-#             f"💳 Сумма к оплате: {amount} ₽\n"
-#             f"🔗 Перейдите по ссылке для оплаты\n\n"
-#             f"После оплаты нажмите «✅ Проверить оплату»",
-#             reply_markup=kb,
-#             parse_mode="HTML"
-#         )
-#
-#     except Exception as e:
-#         print(f"Payment creation error: {e}")
-#         await callback.message.answer(
-#             f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
-#             "⚠️ Платежная система временно недоступна.\n"
-#             "📞 Для покупки сертификата свяжитесь с менеджером: @Therry_Voyager\n\n"
-#             f"Код сертификата: <code>{cert_code}</code>\n"
-#             "Сообщите этот код менеджеру для активации.",
-#             parse_mode="HTML"
-#         )
+@router.message(F.web_app_data)
+async def handle_webapp_data(message: Message):
+    """Обработка данных из веб-приложения"""
+    try:
+        data = json.loads(message.web_app_data.data)
+        logger.info(f"WebApp data: {data}")
+
+        # Обработка данных платежа
+        if data.get('type') == 'payment_result':
+            payment_id = data.get('payment_id')
+            status = data.get('status')
+
+            if payment_id and status:
+                update_payment_status(payment_id, status)
+
+    except Exception as e:
+        logger.error(f"Error processing webapp data: {e}")
+
+
+# Фоновая задача для проверки pending платежей
+async def check_pending_payments():
+    """Фоновая проверка pending платежей"""
+    while True:
+        try:
+            # Здесь будет логика проверки pending платежей
+            logger.info("Checking pending payments...")
+
+            # Пример: поиск платежей со статусом 'pending'
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT payment_id FROM payments WHERE status = 'pending' AND created_at < datetime('now', '-10 minutes')")
+                pending_payments = cur.fetchall()
+
+                for payment_row in pending_payments:
+                    payment_id = payment_row['payment_id']
+                    status = await payment_manager.check_payment_status(payment_id)
+
+                    if status and status != 'pending':
+                        update_payment_status(payment_id, status)
+
+            await asyncio.sleep(300)  # Проверяем каждые 5 минут
+
+        except Exception as e:
+            logger.error(f"Pending payments check failed: {e}")
+            await asyncio.sleep(60)
+
+
+@router.callback_query(F.data.startswith("check_cert_payment_"))
+async def check_cert_payment_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик проверки платежа сертификата"""
+    payment_id = callback.data.split("_")[-1]
+    await check_certificate_payment(payment_id, callback, state)
 
 
 @router.callback_query(F.data.startswith("check_cert_payment_"))
@@ -2157,21 +2156,6 @@ async def check_user_payment_status(callback: CallbackQuery, state: FSMContext):
 
     else:
         await callback.answer("❌ Не удалось проверить статус платежа. Попробуйте позже.")
-
-
-# Фоновая задача для проверки pending платежей
-async def check_pending_payments():
-    """Фоновая проверка pending платежей каждые 5 минут"""
-    while True:
-        try:
-            # Здесь будет логика проверки pending платежей
-            # Например: поиск платежей со статусом 'pending' старше 10 минут
-            logger.info("Checking pending payments...")
-            await asyncio.sleep(300)  # Проверяем каждые 5 минут
-
-        except Exception as e:
-            logger.error(f"Pending payments check failed: {e}")
-            await asyncio.sleep(60)  # Ждем минуту при ошибке
 
 
 async def show_order_summary_from_message(callback: CallbackQuery, state: FSMContext, total: float):

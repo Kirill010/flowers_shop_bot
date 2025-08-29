@@ -9,6 +9,7 @@ from fpdf import FPDF
 import asyncio
 import logging
 from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+from simple_payments import payment_manager
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -44,9 +45,6 @@ async def create_certificate_payment(user_id: int, amount: int, callback: Callba
 
     try:
         logger.info(f"🔄 Создание платежа для сертификата на {amount} руб.")
-
-        # Используем наш улучшенный менеджер платежей
-        from simple_payments import payment_manager
 
         # Упрощенные метаданные
         simplified_metadata = {
@@ -113,3 +111,51 @@ async def handle_certificate_selection(callback: CallbackQuery, state: FSMContex
     except ValueError:
         await callback.answer("❌ Неверный номинал сертификата")
     await callback.answer()
+
+
+async def check_certificate_payment(payment_id: str, callback: CallbackQuery, state: FSMContext):
+    """Проверяет статус платежа сертификата"""
+    try:
+        status = await payment_manager.check_payment_status(payment_id)
+
+        if status == "succeeded":
+            data = await state.get_data()
+            amount = data.get("cert_amount")
+            cert_code = data.get("cert_code")
+
+            # Генерируем PDF сертификат
+            os.makedirs("certificates", exist_ok=True)
+            pdf_path = f"certificates/cert_{callback.from_user.id}_{amount}.pdf"
+            generate_certificate(str(amount), cert_code, pdf_path)
+
+            # Отправляем PDF
+            pdf = FSInputFile(pdf_path)
+            await callback.message.answer_document(
+                document=pdf,
+                caption=f"🎉 Поздравляем! Вы купили сертификат на {amount} ₽\nКод: `{cert_code}`",
+                parse_mode="Markdown"
+            )
+
+            # Сохраняем в БД
+            add_certificate_purchase(
+                user_id=callback.from_user.id,
+                amount=amount,
+                cert_code=cert_code,
+                payment_id=payment_id
+            )
+
+            # Удаляем временный файл
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+
+            await state.clear()
+            await callback.answer("✅ Сертификат успешно создан и отправлен!")
+
+        elif status == "pending":
+            await callback.answer("⏳ Платеж еще обрабатывается. Попробуйте через минуту.")
+        else:
+            await callback.answer("❌ Платёж не прошёл или отменен")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка проверки платежа сертификата: {e}")
+        await callback.answer("❌ Ошибка при проверке платежа")
