@@ -22,6 +22,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
+                email TEXT,
                 description TEXT,
                 full_description TEXT,
                 price REAL NOT NULL,
@@ -520,7 +521,7 @@ def add_product(name: str, description: str, full_description: str, price: float
 
 def create_order(user_id: int, name: str, phone: str, address: str,
                  delivery_date: str, delivery_time: str, payment: str,
-                 delivery_cost: int = 0, delivery_type: str = "delivery",
+                 delivery_cost: int = 0, delivery_type: str = "delivery", email: str = "flowers@example.com",
                  bonus_used: int = 0) -> int:
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -554,11 +555,11 @@ def create_order(user_id: int, name: str, phone: str, address: str,
         cur.execute("""
             INSERT INTO orders 
             (user_id, items, total, customer_name, phone, address, 
-             delivery_date, delivery_time, payment_method, delivery_cost, 
+             delivery_date, delivery_time, payment_method, delivery_cost, email, 
              delivery_type, status, bonus_used)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, json.dumps(cart_items), final_total, name, phone, address,
-              delivery_date, delivery_time, payment, delivery_cost,
+              delivery_date, delivery_time, payment, delivery_cost, email,
               delivery_type, 'new', actual_bonus_used))
 
         order_id = cur.lastrowid

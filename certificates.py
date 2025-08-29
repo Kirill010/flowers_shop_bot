@@ -27,7 +27,8 @@ def generate_certificate(amount: str, cert_code: str, filename: str):
     pdf.set_font("Arial", "", 12)
     pdf.cell(200, 10, txt=f"Код: {cert_code}", ln=True, align="C")
 
-    pdf.multi_cell(0, 8, txt="Действует в течение 1 года с даты покупки. Может быть использован для любых товаров в магазине.")
+    pdf.multi_cell(0, 8,
+                   txt="Действует в течение 1 года с даты покупки. Может быть использован для любых товаров в магазине.")
 
     pdf.output(filename)
     return filename

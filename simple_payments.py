@@ -26,36 +26,95 @@ class SimplePaymentManager:
     async def create_payment(self, amount: int, description: str, metadata: dict) -> dict:
         for attempt in range(self.retry_attempts):
             try:
-                # Создаем платеж через официальную библиотеку YooKassa
-                payment = Payment.create({
+                logger.info(f"🔄 Попытка {attempt + 1} создать платеж на {amount} руб.")
+
+                # --- НАЧАЛО: Добавляем чек (receipt) ---
+                # Пример email для чека (лучше — запросить у пользователя)
+                customer_email = "flowers@example.com"  # Замени на реальный или запроси
+
+                # Состав чека
+                items = []
+
+                # Попробуем получить товары из metadata
+                cart_items = metadata.get("cart_items", []) or metadata.get("order_data", {}).get("cart_items", [])
+
+                for item in cart_items:
+                    item_price = float(item.get("price", 0))
+                    item_quantity = float(item.get("quantity", 1))
+                    items.append({
+                        "description": item["name"][:128],  # Ограничение YooKassa
+                        "quantity": item_quantity,
+                        "amount": {
+                            "value": f"{item_price:.2f}",
+                            "currency": "RUB"
+                        },
+                        "vat_code": "1",  # НДС 20% (см. таблицу ниже)
+                        "payment_mode": "full_payment",
+                        "payment_subject": "commodity"  # Товар
+                    })
+
+                # Если корзина пуста — добавим "Заказ"
+                if not items:
+                    items.append({
+                        "description": "Заказ цветов",
+                        "quantity": 1,
+                        "amount": {
+                            "value": f"{amount:.2f}",
+                            "currency": "RUB"
+                        },
+                        "vat_code": "1",
+                        "payment_mode": "full_payment",
+                        "payment_subject": "service"
+                    })
+
+                # Объект чека
+                receipt = {
+                    "customer": {
+                        "email": customer_email
+                    },
+                    "items": items,
+                    "send": True  # Отправить чек на email
+                }
+                # --- КОНЕЦ: Чек ---
+
+                # Уникальный ключ для идемпотентности
+                idempotency_key = str(uuid.uuid4())
+
+                # Данные для платежа
+                payment_data = {
                     "amount": {
-                        "value": str(amount),
+                        "value": f"{amount:.2f}",
                         "currency": "RUB"
                     },
                     "confirmation": {
                         "type": "redirect",
-                        "return_url": "https://t.me/flowersstories_bot"
+                        "return_url": "https://t.me/flowersstories_bot"  # Лучше — ссылка на бота или сайт
                     },
                     "capture": True,
                     "description": description,
-                    "metadata": metadata
-                })
-
-                # Возвращаем правильную структуру
-                return {
-                    "id": payment.id,
-                    "status": payment.status,
-                    "confirmation_url": payment.confirmation.confirmation_url if payment.confirmation else None,
-                    "amount": amount
+                    "metadata": metadata,
+                    "receipt": receipt  # ← ВАЖНО: добавляем чек сюда
                 }
+
+                # Создаём платеж
+                payment = Payment.create(payment_data, idempotency_key)
+
+                if hasattr(payment, 'confirmation') and hasattr(payment.confirmation, 'confirmation_url'):
+                    logger.info(f"✅ Платёж создан: {payment.id}")
+                    return {
+                        "id": payment.id,
+                        "status": payment.status,
+                        "confirmation_url": payment.confirmation.confirmation_url,
+                        "amount": amount
+                    }
+
             except Exception as e:
                 logger.error(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay)
-                else:
-                    # Fallback: создаем простую платежную ссылку
-                    return await self.create_fallback_payment(amount, description, metadata)
-        return None
+
+        # Fallback — если не получилось
+        return await self.create_fallback_payment(amount, description, metadata)
 
     async def create_fallback_payment(self, amount: int, description: str, metadata: dict) -> dict:
         """Резервный метод создания платежа"""

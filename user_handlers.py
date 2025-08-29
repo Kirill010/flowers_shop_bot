@@ -49,6 +49,7 @@ class OrderState(StatesGroup):
     phone = State()
     delivery_type = State()
     address = State()
+    email = State()
     delivery_date = State()
     delivery_time = State()
     payment = State()
@@ -4021,3 +4022,54 @@ async def test_certificate_command(message: Message):
         reply_markup=kb,
         parse_mode="HTML"
     )
+
+
+@router.message(OrderState.email)
+async def process_email(message: Message, state: FSMContext):
+    email = message.text.strip()
+
+    # Проверка формата (упрощённая)
+    if email.lower() != "пропустить" and "@" not in email:
+        await message.answer("❌ Неверный формат email. Попробуйте снова или напишите 'пропустить'.")
+        return
+
+    # Сохраняем email или None
+    await state.update_data(email=email if "@" in email else "flowers@example.com")
+
+    # Переход к выбору даты
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📅 Выбрать дату", callback_data="choose_date")]
+    ])
+    await message.answer("📆 Выберите дату доставки:", reply_markup=kb)
+    await state.set_state(OrderState.delivery_date)
+
+
+@router.callback_query(F.data == "skip_email")
+async def skip_email(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(email="flowers@example.com")  # дефолтный email
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📅 Выбрать дату", callback_data="choose_date")]
+    ])
+    await callback.message.answer("📆 Выберите дату доставки:", reply_markup=kb)
+    await state.set_state(OrderState.delivery_date)
+    await callback.answer()
+
+
+@router.message(OrderState.email)
+async def process_email(message: Message, state: FSMContext):
+    email = message.text.strip().lower()
+
+    # Проверка формата email
+    if email != "нет" and "@" not in email:
+        await message.answer("❌ Неверный формат email. Попробуйте снова или введите 'нет'.")
+        return
+
+    # Сохраняем email в FSM
+    await state.update_data(email=email if email != "нет" else None)
+
+    # Переходим к выбору даты
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📅 Выбрать дату", callback_data="choose_date")]
+    ])
+    await message.answer("📆 Выберите дату доставки:", reply_markup=kb)
+    await state.set_state(OrderState.delivery_date)
