@@ -756,63 +756,68 @@ async def handle_certificate_selection(callback: CallbackQuery, state: FSMContex
 
 
 async def create_certificate_payment(user_id: int, amount: int, callback: CallbackQuery, state: FSMContext):
-    """Создание платежа для сертификата"""
+    """Создание платежа для сертификата с резервным вариантом"""
     cert_code = f"CERT-{uuid.uuid4().hex[:8].upper()}"
 
     try:
-        # Настройка ЮKassa
-        Configuration.account_id = YOOKASSA_SHOP_ID
-        Configuration.secret_key = YOOKASSA_SECRET_KEY
-
-        # Создаем реальный платеж
-        payment_id = str(uuid.uuid4())
-        payment = Payment.create({
-            "amount": {"value": str(amount), "currency": "RUB"},
-            "confirmation": {
-                "type": "redirect",
-                "return_url": "https://t.me/flowersstories_bot"  # URL бота
-            },
-            "capture": True,
-            "description": f"Подарочный сертификат на {amount}₽",
-            "metadata": {
+        # Пытаемся создать платеж через YooKassa
+        payment = await payment_manager.create_payment(
+            amount=amount,
+            description=f"Подарочный сертификат на {amount}₽",
+            metadata={
                 "user_id": user_id,
                 "cert_code": cert_code,
                 "type": "certificate"
             }
-        }, idempotency_key=payment_id)
-
-        await state.update_data(
-            payment_id=payment.id,
-            cert_amount=amount,
-            cert_code=cert_code,
-            payment_url=payment.confirmation.confirmation_url
         )
-        await state.set_state(CertificateState.waiting_payment)
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Оплатить сертификат", url=payment.confirmation.confirmation_url)],
-            [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_cert_payment_{payment.id}")]
-        ])
+        if payment and payment.get("confirmation_url"):
+            await state.update_data(
+                payment_id=payment["id"],
+                cert_amount=amount,
+                cert_code=cert_code,
+                payment_url=payment["confirmation_url"]
+            )
+            await state.set_state(CertificateState.waiting_payment)
 
-        await callback.message.answer(
-            f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
-            f"💳 Сумма к оплате: {amount} ₽\n"
-            f"🔗 Перейдите по ссылке для оплаты\n\n"
-            f"После оплаты нажмите «✅ Проверить оплату»",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Оплатить сертификат", url=payment["confirmation_url"])],
+                [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_cert_payment_{payment['id']}")],
+                [InlineKeyboardButton(text="💬 Оплатить через менеджера", callback_data=f"pay_via_manager_{amount}")]
+            ])
+
+            await callback.message.answer(
+                f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
+                f"💳 Сумма к оплате: {amount} ₽\n"
+                f"🔗 Перейдите по ссылке для оплаты\n\n"
+                f"После оплаты нажмите «✅ Проверить оплату»\n"
+                f"Или оплатите через менеджера",
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+        else:
+            # Fallback на оплату через менеджера
+            await offer_manager_payment(callback, amount, cert_code)
 
     except Exception as e:
-        print(f"Payment creation error: {e}")
-        await callback.message.answer(
-            f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
-            "⚠️ Платежная система временно недоступна.\n"
-            "📞 Для покупки сертификата свяжитесь с менеджером: @mgk71\n\n"
-            f"Код сертификата: <code>{cert_code}</code>\n"
-            "Сообщите этот код менеджеру для активации.",
-            parse_mode="HTML"
-        )
+        logger.error(f"Payment creation error: {e}")
+        await offer_manager_payment(callback, amount, cert_code)
+
+
+async def offer_manager_payment(callback: CallbackQuery, amount: int, cert_code: str):
+    """Предложить оплату через менеджера"""
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Связаться с менеджером", url="https://t.me/Therry_Voyager")]
+    ])
+
+    await callback.message.answer(
+        f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
+        "💳 Для оплаты свяжитесь с менеджером\n\n"
+        f"🔑 Код сертификата: <code>{cert_code}</code>\n"
+        "Сообщите этот код менеджеру для активации.",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
 
 
 @router.callback_query(F.data.startswith("check_cert_payment_"))
@@ -820,14 +825,16 @@ async def check_cert_payment(callback: CallbackQuery, state: FSMContext):
     payment_id = callback.data.split("_")[-1]
 
     try:
-        payment = Payment.find_one(payment_id)
-        if payment.status == "succeeded":
+        # Проверяем статус платежа
+        status = await payment_manager.check_payment_status(payment_id)
+
+        if status == "succeeded":
             data = await state.get_data()
             amount = data.get("cert_amount")
             cert_code = data.get("cert_code")
 
             # Генерируем PDF
-            pdf_path = f"cert_{callback.from_user.id}_{amount}.pdf"
+            pdf_path = f"certificates/cert_{callback.from_user.id}_{amount}.pdf"
             generate_certificate(str(amount), cert_code, pdf_path)
 
             # Отправляем PDF
@@ -835,7 +842,7 @@ async def check_cert_payment(callback: CallbackQuery, state: FSMContext):
             await callback.message.answer_document(
                 document=pdf,
                 caption=f"🎉 Поздравляем! Вы купили сертификат на {amount} ₽\nКод: `{cert_code}`",
-                parse_mode="HTML"
+                parse_mode="Markdown"
             )
 
             # Сохраняем в БД
@@ -851,12 +858,16 @@ async def check_cert_payment(callback: CallbackQuery, state: FSMContext):
                 os.remove(pdf_path)
 
             await state.clear()
-        else:
-            await callback.message.answer("❌ Платёж не прошёл")
-    except Exception as e:
-        await callback.message.answer(f"❌ Ошибка: {e}")
+            await callback.answer("✅ Сертификат успешно активирован!")
 
-    await callback.answer()
+        elif status == "pending":
+            await callback.answer("⏳ Платеж еще обрабатывается. Попробуйте через минуту.")
+        else:
+            await callback.answer("❌ Платёж не прошёл. Попробуйте еще раз.")
+
+    except Exception as e:
+        logger.error(f"Error checking payment: {e}")
+        await callback.answer("❌ Ошибка при проверке платежа. Свяжитесь с менеджером.")
 
 
 # --- ОТЗЫВЫ ---

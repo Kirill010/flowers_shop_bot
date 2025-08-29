@@ -59,3 +59,6 @@ Path("certificates").mkdir(exist_ok=True)
 # python3.10 -m venv venv
 # source venv/bin/activate
 # pip install aiohttp_socks
+
+# sudo apt update
+# sudo apt install ca-certificates
