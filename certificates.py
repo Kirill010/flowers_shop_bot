@@ -3,13 +3,15 @@ import uuid
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from database import add_certificate_purchase
+from database import *
 import os
 from fpdf import FPDF
 import asyncio
 import logging
 from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
 from simple_payments import payment_manager
+import json
+
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -25,80 +27,84 @@ def generate_certificate(amount: str, cert_code: str, filename: str):
     pdf.add_page()
 
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(200, 10, txt="GIFT CERTIFICATE", ln=True, align="C")
+    pdf.cell(200, 10, txt="ПОДАРОЧНЫЙ СЕРТИФИКАТ", ln=True, align="C")
 
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(200, 10, txt=f"Amount: {amount} RUB", ln=True, align="C")
+    pdf.cell(200, 10, txt=f"Сумма: {amount} RUB", ln=True, align="C")
 
     pdf.set_font("Arial", "", 12)
-    pdf.cell(200, 10, txt=f"Code: {cert_code}", ln=True, align="C")
+    pdf.cell(200, 10, txt=f"Код: {cert_code}", ln=True, align="C")
 
-    pdf.multi_cell(0, 8, txt="Valid for 1 year from purchase date. Can be used for any products in the store.")
+    pdf.multi_cell(0, 8, txt="Действует в течение 1 года с даты покупки. Может быть использован для любых товаров в магазине.")
 
     pdf.output(filename)
     return filename
 
 
 async def create_certificate_payment(user_id: int, amount: int, callback: CallbackQuery, state: FSMContext):
-    """Создает платеж для сертификата"""
     cert_code = f"CERT-{uuid.uuid4().hex[:8].upper()}"
+    description = f"Покупка сертификата на {amount} ₽"
 
     try:
-        logger.info(f"🔄 Создание платежа для сертификата на {amount} руб.")
-
-        # Упрощенные метаданные
-        simplified_metadata = {
-            "user_id": user_id,
-            "cert_code": cert_code,
-            "phone": "9999999999",
-            "type": "certificate"
-        }
-
-        # СОЗДАЕМ ПЛАТЕЖ через наш менеджер
+        # Попытка создать платеж
         payment = await payment_manager.create_payment(
             amount=amount,
-            description=f"Подарочный сертификат на {amount}₽",
-            metadata=simplified_metadata
+            description=description,
+            metadata={
+                "user_id": user_id,
+                "cert_code": cert_code,
+                "type": "certificate"
+            }
         )
 
-        if payment and payment.get("confirmation_url"):
-            await state.update_data(
-                payment_id=payment["id"],
-                cert_amount=amount,
-                cert_code=cert_code,
-                payment_url=payment["confirmation_url"]
-            )
-            await state.set_state(CertificateState.waiting_payment)
-
-            # Создаем кнопки для пользователя
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💳 Оплатить сертификат", url=payment["confirmation_url"])],
-                [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_cert_payment_{payment['id']}")]
-            ])
-
+        if not payment or not payment.get("confirmation_url"):
+            logger.error(f"❌ Платеж не создан: {payment}")
             await callback.message.answer(
-                f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
-                f"💳 Сумма к оплате: {amount} ₽\n"
-                f"🔗 Перейдите по ссылке для оплаты\n\n"
-                f"После оплаты нажмите «✅ Проверить оплату»",
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
-        else:
-            # Если не удалось создать платеж
-            await callback.message.answer(
-                f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
+                f"🎁 <b>Сертификат на {amount} ₽</b>\n"
                 "⚠️ Платежная система временно недоступна.\n"
-                "📞 Для покупки сертификата свяжитесь с менеджером: @Therry_Voyager\n\n"
+                "📞 Свяжитесь с менеджером: @Therry_Voyager\n"
                 f"Код сертификата: <code>{cert_code}</code>\n"
-                "Сообщите этот код менеджеру для активации.",
+                "Сообщите этот код для активации.",
                 parse_mode="HTML"
             )
+            return
+
+        # Успешно создан
+        confirmation_url = payment["confirmation_url"]
+        payment_id = payment["id"]
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить", url=confirmation_url)],
+            [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_cert_payment_{payment_id}")]
+        ])
+
+        await callback.message.answer(
+            f"🎁 <b>Сертификат на {amount} ₽</b>\n"
+            f"💳 Сумма к оплате: {amount} ₽\n"
+            f"🔗 Перейдите по ссылке для оплаты\n"
+            f"После оплаты нажмите «✅ Проверить оплату»",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+
+        # Сохраняем в БД
+        save_payment(
+            payment_id=payment_id,
+            user_id=user_id,
+            amount=amount,
+            status="pending",
+            metadata=json.dumps({"cert_code": cert_code, "type": "certificate"})
+        )
 
     except Exception as e:
-        logger.error(f"❌ Ошибка создания платежа для сертификата: {e}")
+        logger.error(f"❌ Ошибка создания платежа для сертификата: {e}", exc_info=True)
         await callback.message.answer(
-            f"❌ Произошла ошибка при создании платежа. Попробуйте позже или свяжитесь с менеджером."
+            f"🎁 <b>Сертификат на {amount} ₽</b>\n"
+            "⚠️ Платежная система недоступна.\n"
+            "📞 Свяжитесь с менеджером: @Therry_Voyager\n"
+            f"Код сертификата: <code>{cert_code}</code>\n"
+            "Сообщите этот код для активации.",
+            parse_mode="HTML"
         )
 
 

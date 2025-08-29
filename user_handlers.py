@@ -259,10 +259,10 @@ async def show_bouquets(message: Message):
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute("""
-                SELECT * FROM products 
-                WHERE category='bouquet' 
-                AND is_daily = TRUE
-                AND created_date = DATE('now')
+                SELECT id, name, description, full_description, price, photo, category, is_daily, on_request, in_stock 
+                FROM products 
+                WHERE category = 'bouquet' AND is_daily = TRUE 
+                AND created_date = DATE('now') 
                 ORDER BY id DESC
             """)
             bouquets = [dict(row) for row in cur.fetchall()]
@@ -324,9 +324,10 @@ async def show_plants(message: Message):
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             cur.execute("""
-                SELECT * FROM products 
-                WHERE category='plant' AND is_daily = TRUE
-                AND created_date = DATE('now')
+                SELECT id, name, description, full_description, price, photo, category, is_daily, on_request, in_stock 
+                FROM products 
+                WHERE category = 'plant' AND is_daily = TRUE 
+                AND created_date = DATE('now') 
                 ORDER BY id DESC
             """)
             plants = [dict(row) for row in cur.fetchall()]
@@ -3417,7 +3418,8 @@ async def get_bouquet_price(message: Message, state: FSMContext):
             price=price,
             photo=data.get('photo'),
             category=data['category'],
-            is_daily=True
+            is_daily=True,
+            on_request=False
         )
 
         await message.answer(f"✅ Букет «{data['name']}» добавлен как букет дня! Цена: {price} ₽")
