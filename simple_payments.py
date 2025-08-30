@@ -1,17 +1,41 @@
-import logging
+# simple_payments.py
 import asyncio
 import uuid
-from typing import Optional
-from config import *
+import logging
+from typing import Optional, Dict
 from yookassa import Configuration, Payment
-import aiohttp
+from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, YOOKASSA_TAX_RATE, YOOKASSA_TAX_SYSTEM
+from database import save_payment, update_payment_status, get_payment
+import ssl
+import requests
+from requests.auth import HTTPBasicAuth
+import json
 
 logger = logging.getLogger(__name__)
 
-# Настройка YooKassa
+# configure yookassa (synchronous library) — safe to set once
 Configuration.account_id = YOOKASSA_SHOP_ID
 Configuration.secret_key = YOOKASSA_SECRET_KEY
 
+
+def check_yookassa_sync():
+    """Синхронная проверка доступности YooKassa"""
+    try:
+        response = requests.get(
+            'https://api.yookassa.ru/v3/payments',
+            auth=HTTPBasicAuth(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY),
+            timeout=10,
+            params={'limit': 1}
+        )
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Синхронная проверка failed: {e}")
+        return False
+
+# Добавьте этот метод в класс
+async def check_yookassa_sync_wrapper(self):
+    """Обертка для синхронной проверки"""
+    return await asyncio.to_thread(self.check_yookassa_sync)
 
 class SimplePaymentManager:
     def __init__(self):
@@ -19,124 +43,157 @@ class SimplePaymentManager:
         self.retry_delay = 2
 
     async def check_yookassa_availability(self) -> bool:
+        import aiohttp
         try:
-            async with aiohttp.ClientSession() as session:
+            # Создаем кастомный SSL контекст
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+            auth = aiohttp.BasicAuth(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY)
+
+            async with aiohttp.ClientSession(auth=auth) as session:
                 async with session.get(
-                        'https://api.yookassa.ru/v3/',
-                        timeout=10,
-                        auth=aiohttp.BasicAuth(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY)
+                        'https://api.yookassa.ru/v3/payments',
+                        ssl=ssl_context,
+                        timeout=30,
+                        params={'limit': 1}
                 ) as response:
-                    return response.status == 200
+                    # YooKassa возвращает 200 даже если нет платежей
+                    return response.status in [200, 201, 204]
+
+        except aiohttp.ClientError as e:
+            logger.error(f"YooKassa network error: {e}")
+            return False
+        except asyncio.TimeoutError:
+            logger.error("YooKassa timeout - сервер не отвечает")
+            return False
         except Exception as e:
-            logger.error(f"YooKassa недоступен: {e}")
+            logger.error(f"YooKassa availability check failed: {e}")
             return False
 
-    async def create_payment(self, amount: int, description: str, metadata: dict, customer_email: str) -> dict:
+    async def create_payment(self, user_id: int, amount: float, description: str, metadata: dict = None,
+                             customer_email: str = None) -> Dict:
+        """
+        Создает платёж в YooKassa. Возвращает dict с id, status, confirmation_url, amount
+        """
+        metadata = metadata or {}
+        # format amount to 2 decimals string for API
+        amount_str = f"{float(amount):.2f}"
+
+        # prepare receipt items if present in metadata
+        receipt_items = []
+        cart_items = metadata.get("cart_items", [])
+
+        # Убедитесь, что cart_items является списком
+        if isinstance(cart_items, str):
+            try:
+                cart_items = json.loads(cart_items)
+            except:
+                cart_items = []
+
+        for item in cart_items:
+            receipt_items.append({
+                "description": item.get("name", "")[:128],
+                "quantity": f"{float(item.get('quantity', 1)):.2f}",  # Используем float вместо int
+                "amount": {"value": f"{float(item.get('price', 0)):.2f}", "currency": "RUB"},
+                "vat_code": YOOKASSA_TAX_RATE,
+                "payment_mode": "full_payment",
+                "payment_subject": "commodity"
+            })
+
+        delivery_cost = float(metadata.get("delivery_cost", 0))
+        if delivery_cost > 0:
+            receipt_items.append({
+                "description": "Доставка",
+                "quantity": "1.00",
+                "amount": {"value": f"{delivery_cost:.2f}", "currency": "RUB"},
+                "vat_code": YOOKASSA_TAX_RATE,
+                "payment_mode": "full_payment",
+                "payment_subject": "service"
+            })
+
+        # for certificate: single service item
+        if metadata.get("type") == "certificate":
+            receipt_items = [{
+                "description": f"Подарочный сертификат {metadata.get('cert_code', '')}"[:128],
+                "quantity": "1.00",
+                "amount": {"value": amount_str, "currency": "RUB"},
+                "vat_code": YOOKASSA_TAX_RATE,
+                "payment_mode": "full_payment",
+                "payment_subject": "service"
+            }]
+
+        payment_data = {
+            "amount": {"value": amount_str, "currency": "RUB"},
+            "confirmation": {"type": "redirect",
+                             "return_url": metadata.get("return_url", "https://t.me/flowersstories_bot")},
+            "capture": True,
+            "description": description,
+            "metadata": metadata
+        }
+
+        if receipt_items and (customer_email or metadata.get("email")):
+            payment_data["receipt"] = {
+                "customer": {"email": customer_email or metadata.get("email")},
+                "items": receipt_items,
+                "tax_system_code": YOOKASSA_TAX_SYSTEM
+            }
+
         for attempt in range(self.retry_attempts):
             try:
-                logger.info(f"🔄 Попытка {attempt + 1} создать платеж на {amount} руб.")
+                # yookassa is blocking -> run in thread
+                def create_call():
+                    return Payment.create(payment_data, idempotence_key=str(uuid.uuid4()))
 
-                # Подготовка чека
-                receipt_items = []
+                payment = await asyncio.to_thread(create_call)
 
-                # Используем переданный email, а не перезаписываем
-                if not customer_email or customer_email == "flowers@example.com":
-                    customer_email = metadata.get('email', "flowers@example.com")
+                # save to DB as pending
+                save_payment(payment.id, user_id, float(amount_str), payment.status, description, metadata)
 
-                cart_items = metadata.get("cart_items", [])
-                delivery_cost = metadata.get("delivery_cost", 0)
-
-                # Формируем позиции чека для товаров
-                for item in cart_items:
-                    receipt_items.append({
-                        "description": item["name"][:128],
-                        "quantity": str(item["quantity"]),  # Должно быть строкой
-                        "amount": {"value": f"{float(item['price']):.2f}", "currency": "RUB"},
-                        "vat_code": YOOKASSA_TAX_RATE,
-                        "payment_mode": "full_payment",
-                        "payment_subject": "commodity"
-                    })
-
-                # Добавляем доставку как отдельную позицию
-                if delivery_cost > 0:
-                    receipt_items.append({
-                        "description": "Доставка",
-                        "quantity": "1.00",  # Должно быть строкой с двумя знаками после запятой
-                        "amount": {"value": f"{float(delivery_cost):.2f}", "currency": "RUB"},
-                        "vat_code": YOOKASSA_TAX_RATE,
-                        "payment_mode": "full_payment",
-                        "payment_subject": "service"
-                    })
-
-                # Для сертификатов создаем отдельную позицию
-                if metadata.get('type') == 'certificate':
-                    receipt_items.append({
-                        "description": f"Подарочный сертификат {metadata.get('cert_code', '')}"[:128],
-                        "quantity": "1.00",
-                        "amount": {"value": f"{float(amount):.2f}", "currency": "RUB"},
-                        "vat_code": YOOKASSA_TAX_RATE,
-                        "payment_mode": "full_payment",
-                        "payment_subject": "service"
-                    })
-
-                # Если нет позиций для чека, не включаем receipt в запрос
-                payment_data = {
-                    "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
-                    "confirmation": {"type": "redirect", "return_url": "https://t.me/Therry_Voyager"},
-                    "capture": True,
-                    "description": description,
-                    "metadata": metadata,
-                }
-
-                # Добавляем чек только если есть позиции
-                if receipt_items:
-                    payment_data["receipt"] = {
-                        "customer": {"email": customer_email},
-                        "items": receipt_items,
-                        "tax_system_code": YOOKASSA_TAX_SYSTEM
-                    }
-
-                payment = Payment.create(payment_data)
-
-                if payment.confirmation and payment.confirmation.confirmation_url:
-                    logger.info(f"✅ Платёж создан: {payment.id}")
+                if hasattr(payment, "confirmation") and hasattr(payment.confirmation, "confirmation_url"):
                     return {
                         "id": payment.id,
                         "status": payment.status,
                         "confirmation_url": payment.confirmation.confirmation_url,
-                        "amount": amount
+                        "amount": float(amount_str)
+                    }
+                else:
+                    # If successful but no confirmation url - return minimal
+                    return {
+                        "id": payment.id,
+                        "status": payment.status,
+                        "confirmation_url": None,
+                        "amount": float(amount_str)
                     }
 
             except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed: {e}")
+                logger.error(f"Payment create attempt {attempt + 1} failed: {e}")
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay)
 
-        return await self.create_fallback_payment(amount, description, metadata)
+        raise RuntimeError("Не удалось создать платёж в YooKassa")
 
     async def check_payment_status(self, payment_id: str) -> Optional[str]:
+        """
+        Возвращает статус платежа ('pending', 'succeeded', 'canceled', etc.)
+        """
         for attempt in range(self.retry_attempts):
             try:
-                payment = Payment.find_one(payment_id)
-                return payment.status
+                def find_call():
+                    return Payment.find_one(payment_id)
+
+                payment = await asyncio.to_thread(find_call)
+                if payment:
+                    # update DB record
+                    update_payment_status(payment.id, payment.status)
+                    return payment.status
+                break
             except Exception as e:
-                logger.error(f"Check attempt {attempt + 1} failed: {e}")
+                logger.error(f"Payment check attempt {attempt + 1} failed: {e}")
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay)
         return None
-
-    async def create_fallback_payment(self, amount: int, description: str, metadata: dict) -> dict:
-        try:
-            payment_id = f"fallback_{uuid.uuid4().hex[:8]}"
-            return {
-                "id": payment_id,
-                "status": "pending",
-                "confirmation_url": f"https://yoomoney.ru/quickpay/confirm.xml?receiver={YOOKASSA_SHOP_ID}&sum={amount}&label={payment_id}",
-                "amount": amount
-            }
-        except Exception as e:
-            logger.error(f"Fallback failed: {e}")
-            return None
 
 
 payment_manager = SimplePaymentManager()

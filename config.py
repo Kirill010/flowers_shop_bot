@@ -1,4 +1,5 @@
 import os
+import ssl
 from pathlib import Path
 
 # Токен бота
@@ -52,6 +53,10 @@ DB_PATH = "data/florist.db"
 Path("data").mkdir(exist_ok=True)
 Path("ssl").mkdir(exist_ok=True)
 Path("certificates").mkdir(exist_ok=True)
+
+SSL_CONTEXT = ssl.create_default_context()
+SSL_CONTEXT.check_hostname = False
+SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 # /add - Добавить товар
 # /update_catalog

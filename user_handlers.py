@@ -16,7 +16,7 @@ import json
 import uuid
 import sqlite3
 from aiogram.filters.state import StateFilter
-from certificates import CertificateState, generate_certificate
+from certificates import *
 from simple_payments import payment_manager
 from database import save_payment, update_payment_status, get_payment
 import asyncio
@@ -88,6 +88,11 @@ class BudgetRequestState(StatesGroup):
 
 class AdminEditPrice(StatesGroup):
     waiting_for_price = State()
+
+
+class CertificateState(StatesGroup):
+    waiting_payment = State()
+    email = State()
 
 
 try:
@@ -1667,55 +1672,61 @@ async def check_payment_status(callback: CallbackQuery, state: FSMContext):
     """Проверка статуса платежа с созданием чека"""
     payment_id = callback.data.split("_")[2]
 
-    status = await payment_manager.check_payment_status(payment_id)
+    try:
+        status = await payment_manager.check_payment_status(payment_id)
 
-    if status == "succeeded":
-        # Получаем данные
-        data = await state.get_data()
-        user_id = callback.from_user.id
-        email = data.get('customer_email')
+        if status == "succeeded":
+            # Получаем данные
+            data = await state.get_data()
+            user_id = callback.from_user.id
+            email = data.get('customer_email')
 
-        # Создаем чек
-        success = await receipt_manager.create_receipt(payment_id, email)
+            # Создаем чек
+            success = await receipt_manager.create_receipt(payment_id, email)
 
-        if success:
-            await callback.message.answer("✅ Чек отправлен на ваш email!")
+            if success:
+                await callback.message.answer("✅ Чек отправлен на ваш email!")
 
-        # Создаем заказ
-        order_id = create_order(
-            user_id=user_id,
-            name=data.get('name', ''),
-            phone=data.get('phone', ''),
-            address=data.get('address', ''),
-            delivery_date=data.get('delivery_date', ''),
-            delivery_time=data.get('delivery_time', ''),
-            payment=data.get('payment_method', 'online'),
-            delivery_cost=data.get('delivery_cost', 0),
-            delivery_type=data.get('delivery_type', 'delivery'),
-            bonus_used=data.get('bonus_used', 0)
-        )
-
-        if order_id != -1:
-            await callback.message.answer(
-                f"✅ <b>Оплата принята!</b>\n\n"
-                f"Заказ #{order_id} успешно оформлен.\n"
-                f"Менеджер свяжется с вами для подтверждения.",
-                parse_mode="HTML"
+            # Создаем заказ
+            order_id = create_order(
+                user_id=user_id,
+                name=data.get('name', ''),
+                phone=data.get('phone', ''),
+                address=data.get('address', ''),
+                delivery_date=data.get('delivery_date', ''),
+                delivery_time=data.get('delivery_time', ''),
+                payment=data.get('payment_method', 'online'),
+                delivery_cost=data.get('delivery_cost', 0),
+                delivery_type=data.get('delivery_type', 'delivery'),
+                email=email,
+                bonus_used=data.get('bonus_used', 0)
             )
 
-            # Отправляем уведомление администраторам
-            await notify_admins_about_new_order(order_id, user_id, data)
+            if order_id != -1:
+                await callback.message.answer(
+                    f"✅ <b>Оплата принята!</b>\n\n"
+                    f"Заказ #{order_id} успешно оформлен.\n"
+                    f"Менеджер свяжется с вами для подтверждения.",
+                    parse_mode="HTML"
+                )
 
-            await state.clear()
+                # Отправляем уведомление администраторам
+                await notify_admins_about_new_order(order_id, user_id, data)
+
+                await state.clear()
+            else:
+                await callback.message.answer(
+                    "❌ Ошибка при создании заказа. Пожалуйста, свяжитесь с менеджером."
+                )
+
+        elif status == 'pending':
+            await callback.answer("⏳ Платеж еще обрабатывается. Попробуйте через минуту.")
         else:
-            await callback.message.answer(
-                "❌ Ошибка при создании заказа. Пожалуйста, свяжитесь с менеджером."
-            )
+            await callback.answer("❌ Платеж не прошел. Попробуйте еще раз или выберите другой способ оплаты.")
 
-    elif status == 'pending':
-        await callback.answer("⏳ Платеж еще обрабатывается. Попробуйте через минуту.")
-    else:
-        await callback.answer("❌ Платеж не прошел. Попробуйте еще раз или выберите другой способ оплаты.")
+    except Exception as e:
+        logger.error(f"Error checking payment: {e}")
+        await callback.answer("❌ Ошибка при проверке платежа. Свяжитесь с менеджером.")
 
 
 async def notify_admins_about_new_order(order_id: int, user_id: int, order_data: dict):
