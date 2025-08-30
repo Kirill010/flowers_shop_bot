@@ -1,91 +1,91 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher
-from user_handlers import router as user_router, auto_cleanup_daily_products, check_pending_payments
-from database import *
-from config import BOT_TOKEN, ADMINS
-from simple_payments import *
-from certificates import create_certificate_payment
-from pathlib import Path
+from aiogram.fsm.storage.memory import MemoryStorage
+from user_handlers import router as user_router
+from config import BOT_TOKEN, DEBUG, WEBAPP_HOST, WEBAPP_PORT
+from database import init_db
+from webhook_manager import webhook_manager
+from webhook_server import start_webhook_server, stop_webhook_server
+from simple_payments import payment_manager
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 
-async def check_pending_payments_task(bot):
-    """Периодически проверяем pending платежи в БД и обновляем статус"""
-    while True:
-        try:
-            pendings = get_pending_payments()
-            for p in pendings:
-                payment_id = p['payment_id']
-                status = await payment_manager.check_payment_status(payment_id)
-                if status and status != p['status']:
-                    update_payment_status(payment_id, status)
-                    # можно уведомить юзера по user_id
-            await asyncio.sleep(30)  # каждые 30 сек
-        except Exception as e:
-            logger.exception("Error checking pending payments: %s", e)
-            await asyncio.sleep(10)
+async def on_startup():
+    """Действия при запуске приложения"""
+    logger.info("🔧 Starting application...")
+
+    # Инициализация базы данных
+    logger.info("📀 Initializing database...")
+    init_db()
+
+    # Настройка вебхуков в YooKassa
+    logger.info("🌐 Setting up YooKassa webhooks...")
+    await webhook_manager.setup_webhooks()
+
+    # Проверка подключения к YooKassa
+    logger.info("🔍 Checking YooKassa connection...")
+    try:
+        # Простая проверка через создание тестового платежа
+        test_payment = await payment_manager.create_payment(
+            user_id=1,
+            amount=1.00,
+            description="Test connection",
+            metadata={"type": "test"}
+        )
+        logger.info(f"✅ YooKassa connection successful. Test payment: {test_payment['id']}")
+    except Exception as e:
+        logger.error(f"❌ YooKassa connection failed: {e}")
+        # Не прерываем работу, так как вебхуки могут работать
+
+
+async def on_shutdown():
+    """Действия при остановке приложения"""
+    logger.info("🛑 Shutting down application...")
 
 
 async def main():
-    logger.info("Инициализация базы данных...")
-    init_db()
-    logger.info("База данных инициализирована")
+    """Основная функция приложения"""
+    try:
+        # Инициализация
+        await on_startup()
 
-    # Проверяем доступность YooKassa несколькими способами
-    logger.info("Проверка доступности YooKassa...")
+        # Создаем бота и диспетчер
+        bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
+        storage = MemoryStorage()
+        dp = Dispatcher(storage=storage)
 
-    # Способ 1: Асинхронная проверка
-    yookassa_available = await payment_manager.check_yookassa_availability()
-    bot = Bot(token=BOT_TOKEN)
-    if not yookassa_available:
-        # Способ 2: Синхронная проверка
-        logger.warning("Асинхронная проверка failed, пробуем синхронную...")
+        # Регистрируем роутеры
+        dp.include_router(user_router)
+
+        # Запускаем сервер вебхуков
+        webhook_runner = await start_webhook_server()
+
+        # Запускаем бота
+        logger.info("🤖 Starting bot...")
+
         try:
-            yookassa_available = check_yookassa_sync()
-        except:
-            yookassa_available = False
+            await dp.start_polling(bot)
+        except Exception as e:
+            logger.error(f"❌ Bot polling error: {e}")
+        finally:
+            # Корректное завершение
+            await bot.session.close()
+            await stop_webhook_server(webhook_runner)
+            await on_shutdown()
 
-    if not yookassa_available:
-        logger.error("YooKassa недоступен! Проверьте настройки и интернет-соединение.")
-
-        # Отправляем детальное сообщение админам
-        error_msg = (
-            "⚠️ <b>YooKassa недоступен!</b>\n\n"
-            "Возможные причины:\n"
-            "• Неправильные учетные данные\n"
-            "• Проблемы с интернет-соединением\n"
-            "• Блокировка firewall\n"
-            "• Проблемы с SSL сертификатами\n\n"
-            "Проверьте:\n"
-            "• SHOP_ID и SECRET_KEY в config.py\n"
-            "• Интернет-подключение сервера\n"
-            "• Доступность api.yookassa.ru"
-        )
-
-        for admin_id in ADMINS:
-            try:
-                await bot.send_message(admin_id, error_msg, parse_mode="HTML")
-            except Exception as e:
-                logger.error(f"Не удалось отправить сообщение админу {admin_id}: {e}")
-    else:
-        logger.info("✅ YooKassa доступен")
-
-    dp = Dispatcher()
-
-    # Регистрируем роутеры
-    dp.include_router(user_router)
-
-    # Запускаем фоновые задачи
-    asyncio.create_task(auto_cleanup_daily_products())
-    asyncio.create_task(check_pending_payments())
-
-    # Запускаем бота
-    logger.info("Starting bot...")
-    await dp.start_polling(bot)
+    except KeyboardInterrupt:
+        logger.info("⏹️ Application stopped by user")
+    except Exception as e:
+        logger.error(f"💥 Critical error: {e}")
+        raise
 
 
 if __name__ == "__main__":
+    # Запускаем главный цикл
     asyncio.run(main())
