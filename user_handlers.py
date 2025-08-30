@@ -722,6 +722,7 @@ async def process_certificate_email(message: Message, state: FSMContext):
     }
 
     payment = await payment_manager.create_payment(
+        user_id=message.from_user.id,
         amount=amount,
         description=f"Подарочный сертификат на {amount}₽",
         metadata=metadata,
@@ -780,6 +781,7 @@ async def create_certificate_payment(user_id: int, amount: int, callback: Callba
     try:
         # Пытаемся создать платеж через YooKassa
         payment = await payment_manager.create_payment(
+            user_id=user_id,
             amount=amount,
             description=f"Подарочный сертификат на {amount}₽",
             metadata={
@@ -1634,6 +1636,7 @@ async def process_email_for_receipt(message: Message, state: FSMContext):
 
     # Создаем платеж
     payment = await payment_manager.create_payment(
+        user_id=message.from_user.id,
         amount=total_amount,
         description=f"Заказ цветов на {total_amount}₽",
         metadata=metadata,

@@ -261,7 +261,7 @@ def get_active_webhooks():
         cur = conn.cursor()
         cur.execute("SELECT * FROM yookassa_webhooks WHERE is_active = TRUE")
         return [dict(row) for row in cur.fetchall()]
-    
+
 
 def calculate_order_total(cart_items: list, delivery_cost: int, bonus_used: int = 0, user_id: int = None) -> dict:
     """Рассчитывает итоговую сумму заказа с учетом бонусов"""

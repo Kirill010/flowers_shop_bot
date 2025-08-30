@@ -9,6 +9,7 @@ import os
 Configuration.account_id = YOOKASSA_SHOP_ID
 Configuration.secret_key = YOOKASSA_SECRET_KEY
 
+
 def generate_certificate_pdf(amount: int, cert_code: str, filename: str):
     pdf = FPDF()
     pdf.add_page()
@@ -24,7 +25,9 @@ def generate_certificate_pdf(amount: int, cert_code: str, filename: str):
     pdf.output(filename)
     return filename
 
-async def create_certificate_payment(user_id: int, amount: int, return_url: str = "https://t.me/flowersstories_bot", email: str = None):
+
+async def create_certificate_payment(user_id: int, amount: int, return_url: str = "https://t.me/flowersstories_bot",
+                                     email: str = None):
     cert_code = f"CERT-{uuid.uuid4().hex[:8].upper()}"
     amount_str = f"{float(amount):.2f}"
     payment_data = {
@@ -55,7 +58,8 @@ async def create_certificate_payment(user_id: int, amount: int, return_url: str 
     payment = await asyncio.to_thread(create_call)
 
     # store minimal data in DB (pending)
-    save_payment(payment.id, user_id, float(amount_str), payment.status, payment.description, payment.metadata if hasattr(payment, "metadata") else payment_data["metadata"])
+    save_payment(payment.id, user_id, float(amount_str), payment.status, payment.description,
+                 payment.metadata if hasattr(payment, "metadata") else payment_data["metadata"])
 
     # generate pdf (non-blocking)
     filename = os.path.join("certificates", f"{cert_code}.pdf")

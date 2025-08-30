@@ -7,6 +7,7 @@ import json
 
 logger = logging.getLogger(__name__)
 
+
 class ReceiptManager:
     def __init__(self):
         self.default_email = "client@example.com"
@@ -47,7 +48,7 @@ class ReceiptManager:
                     })
             elif metadata.get("type") == "certificate":
                 items.append({
-                    "description": f"Подарочный сертификат {metadata.get('cert_code','')}"[:128],
+                    "description": f"Подарочный сертификат {metadata.get('cert_code', '')}"[:128],
                     "quantity": "1.00",
                     "amount": {"value": f"{float(payment_info['amount']):.2f}", "currency": "RUB"},
                     "vat_code": YOOKASSA_TAX_RATE,
@@ -67,11 +68,13 @@ class ReceiptManager:
             # blocking -> thread
             def create_call():
                 return Receipt.create(receipt_data)
+
             receipt = await asyncio.to_thread(create_call)
             logger.info(f"Receipt created {receipt.id} for payment {payment_id}")
             return True
         except Exception as e:
             logger.exception(f"Error creating receipt: {e}")
             return False
+
 
 receipt_manager = ReceiptManager()
