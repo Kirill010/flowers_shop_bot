@@ -7,7 +7,6 @@ from typing import Union, Optional, Dict, List
 import sqlite3
 from keyboards import *
 from database import *
-from certificates import *
 from config import SHOP_INFO, BOT_TOKEN, DB_PATH, ADMINS
 from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
 from yookassa import Configuration
@@ -16,7 +15,7 @@ import json
 import uuid
 import sqlite3
 from aiogram.filters.state import StateFilter
-from certificates import *
+from certificates import generate_certificate
 from simple_payments import payment_manager
 from database import save_payment, update_payment_status, get_payment
 import asyncio
@@ -855,7 +854,8 @@ async def check_cert_payment(callback: CallbackQuery, state: FSMContext):
 
             # Генерируем PDF
             pdf_path = f"certificates/cert_{callback.from_user.id}_{amount}.pdf"
-            generate_certificate(str(amount), cert_code, pdf_path)
+            await asyncio.to_thread(generate_certificate, amount, cert_code, pdf_path)
+            # generate_certificate(str(amount), cert_code, pdf_path)
 
             # Отправляем PDF
             pdf = FSInputFile(pdf_path)
