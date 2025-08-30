@@ -23,12 +23,12 @@ WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
 WEBAPP_PORT = int(os.getenv("WEBAPP_PORT", "3001"))
 
 # Ваш домен (ЗАМЕНИТЕ НА РЕАЛЬНЫЙ!)
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "ваш-реальный-домен.ru")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "flowerup.site")
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook/yookassa")
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 # Секрет для вебхука
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "your_secure_secret_token_here")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "flowersup123")
 
 # Остальные настройки остаются без изменений...
 YOOKASSA_TAX_RATE = int(os.getenv("YOOKASSA_TAX_RATE", "1"))
