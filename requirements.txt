@@ -9,6 +9,3 @@ qrcode[pil]==7.4.2
 fpdf2==2.7.4
 aiohttp-socks==0.8.2
 python-dotenv==1.0.0
-hmac
-hashlib
-ssl
