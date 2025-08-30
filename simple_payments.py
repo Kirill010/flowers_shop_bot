@@ -1,15 +1,14 @@
-from yookassa import Payment, Configuration
-import uuid
-import asyncio
-from typing import Optional
 import logging
-from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, IS_LOCAL, LOCAL_TUNNEL_URL
+import asyncio
+import uuid
+from typing import Optional
+from config import *
+from yookassa import Configuration, Payment
 import aiohttp
-import ssl
 
 logger = logging.getLogger(__name__)
 
-# Настройка ЮKassa
+# Настройка YooKassa
 Configuration.account_id = YOOKASSA_SHOP_ID
 Configuration.secret_key = YOOKASSA_SECRET_KEY
 
@@ -18,92 +17,88 @@ class SimplePaymentManager:
     def __init__(self):
         self.retry_attempts = 3
         self.retry_delay = 2
-        # Создаем SSL контекст для безопасного подключения
-        self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
 
-    async def create_payment(self, amount: int, description: str, metadata: dict) -> dict:
+    async def check_yookassa_availability(self) -> bool:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                        'https://api.yookassa.ru/v3/',
+                        timeout=10,
+                        auth=aiohttp.BasicAuth(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY)
+                ) as response:
+                    return response.status == 200
+        except Exception as e:
+            logger.error(f"YooKassa недоступен: {e}")
+            return False
+
+    async def create_payment(self, amount: int, description: str, metadata: dict, customer_email: str) -> dict:
         for attempt in range(self.retry_attempts):
             try:
                 logger.info(f"🔄 Попытка {attempt + 1} создать платеж на {amount} руб.")
 
-                # Для локального тестирования используем упрощенный подход
-                if IS_LOCAL:
-                    return await self.create_local_payment(amount, description, metadata)
+                # Подготовка чека
+                receipt_items = []
 
-                # --- НАЧАЛО: Добавляем чек (receipt) ---
-                # Пример email для чека (лучше — запросить у пользователя)
-                customer_email = "flowers@example.com"  # Замени на реальный или запроси
+                # Используем переданный email, а не перезаписываем
+                if not customer_email or customer_email == "flowers@example.com":
+                    customer_email = metadata.get('email', "flowers@example.com")
 
-                # Состав чека
-                items = []
+                cart_items = metadata.get("cart_items", [])
+                delivery_cost = metadata.get("delivery_cost", 0)
 
-                # Попробуем получить товары из metadata
-                cart_items = metadata.get("cart_items", []) or metadata.get("order_data", {}).get("cart_items", [])
-
+                # Формируем позиции чека для товаров
                 for item in cart_items:
-                    item_price = float(item.get("price", 0))
-                    item_quantity = float(item.get("quantity", 1))
-                    items.append({
-                        "description": item["name"][:128],  # Ограничение YooKassa
-                        "quantity": item_quantity,
-                        "amount": {
-                            "value": f"{item_price:.2f}",
-                            "currency": "RUB"
-                        },
-                        "vat_code": "1",  # НДС 20% (см. таблицу ниже)
+                    receipt_items.append({
+                        "description": item["name"][:128],
+                        "quantity": str(item["quantity"]),  # Должно быть строкой
+                        "amount": {"value": f"{float(item['price']):.2f}", "currency": "RUB"},
+                        "vat_code": YOOKASSA_TAX_RATE,
                         "payment_mode": "full_payment",
-                        "payment_subject": "commodity"  # Товар
+                        "payment_subject": "commodity"
                     })
 
-                # Если корзина пуста — добавим "Заказ"
-                if not items:
-                    items.append({
-                        "description": "Заказ цветов",
-                        "quantity": 1,
-                        "amount": {
-                            "value": f"{amount:.2f}",
-                            "currency": "RUB"
-                        },
-                        "vat_code": "1",
+                # Добавляем доставку как отдельную позицию
+                if delivery_cost > 0:
+                    receipt_items.append({
+                        "description": "Доставка",
+                        "quantity": "1.00",  # Должно быть строкой с двумя знаками после запятой
+                        "amount": {"value": f"{float(delivery_cost):.2f}", "currency": "RUB"},
+                        "vat_code": YOOKASSA_TAX_RATE,
                         "payment_mode": "full_payment",
                         "payment_subject": "service"
                     })
 
-                # Объект чека
-                receipt = {
-                    "customer": {
-                        "email": customer_email
-                    },
-                    "items": items,
-                    "send": True  # Отправить чек на email
-                }
-                # --- КОНЕЦ: Чек ---
+                # Для сертификатов создаем отдельную позицию
+                if metadata.get('type') == 'certificate':
+                    receipt_items.append({
+                        "description": f"Подарочный сертификат {metadata.get('cert_code', '')}"[:128],
+                        "quantity": "1.00",
+                        "amount": {"value": f"{float(amount):.2f}", "currency": "RUB"},
+                        "vat_code": YOOKASSA_TAX_RATE,
+                        "payment_mode": "full_payment",
+                        "payment_subject": "service"
+                    })
 
-                # Уникальный ключ для идемпотентности
-                idempotency_key = str(uuid.uuid4())
-
-                # Данные для платежа
+                # Если нет позиций для чека, не включаем receipt в запрос
                 payment_data = {
-                    "amount": {
-                        "value": f"{amount:.2f}",
-                        "currency": "RUB"
-                    },
-                    "confirmation": {
-                        "type": "redirect",
-                        "return_url": "https://t.me/flowersstories_bot"  # Лучше — ссылка на бота или сайт
-                    },
+                    "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+                    "confirmation": {"type": "redirect", "return_url": "https://t.me/Therry_Voyager"},
                     "capture": True,
                     "description": description,
                     "metadata": metadata,
-                    "receipt": receipt  # ← ВАЖНО: добавляем чек сюда
                 }
 
-                # Создаём платеж
-                payment = Payment.create(payment_data, idempotency_key)
+                # Добавляем чек только если есть позиции
+                if receipt_items:
+                    payment_data["receipt"] = {
+                        "customer": {"email": customer_email},
+                        "items": receipt_items,
+                        "tax_system_code": YOOKASSA_TAX_SYSTEM
+                    }
 
-                if hasattr(payment, 'confirmation') and hasattr(payment.confirmation, 'confirmation_url'):
+                payment = Payment.create(payment_data)
+
+                if payment.confirmation and payment.confirmation.confirmation_url:
                     logger.info(f"✅ Платёж создан: {payment.id}")
                     return {
                         "id": payment.id,
@@ -117,59 +112,31 @@ class SimplePaymentManager:
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay)
 
-        # Fallback — если не получилось
         return await self.create_fallback_payment(amount, description, metadata)
 
-    async def create_fallback_payment(self, amount: int, description: str, metadata: dict) -> dict:
-        """Резервный метод создания платежа"""
-        try:
-            payment_id = f"fallback_{uuid.uuid4().hex[:8]}"
-            return {
-                "id": payment_id,
-                "status": "pending",
-                "confirmation_url": f"https://yoomoney.ru/quickpay/confirm.xml?receiver={YOOKASSA_SHOP_ID}&quickpay-form=button&sum={amount}&label={payment_id}",
-                "amount": amount
-            }
-        except Exception as e:
-            logger.error(f"Fallback payment creation failed: {e}")
-            return None
-
     async def check_payment_status(self, payment_id: str) -> Optional[str]:
-        """Проверка статуса платежа в ЮKassa"""
         for attempt in range(self.retry_attempts):
             try:
                 payment = Payment.find_one(payment_id)
                 return payment.status
             except Exception as e:
-                logger.error(f"Payment status check attempt {attempt + 1} failed: {e}")
+                logger.error(f"Check attempt {attempt + 1} failed: {e}")
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay)
-        return "succeeded"  # В случае ошибки считаем платеж успешным для тестирования
+        return None
 
-    async def create_local_payment(self, amount: int, description: str, metadata: dict) -> dict:
-        """Создание тестового платежа для локальной разработки"""
+    async def create_fallback_payment(self, amount: int, description: str, metadata: dict) -> dict:
         try:
-            payment_id = f"test_{uuid.uuid4().hex[:8]}"
-
-            # Создаем тестовую страницу оплаты
-            test_payment_url = f"https://{LOCAL_TUNNEL_URL}/test_payment/{payment_id}"
-
+            payment_id = f"fallback_{uuid.uuid4().hex[:8]}"
             return {
                 "id": payment_id,
                 "status": "pending",
-                "confirmation_url": test_payment_url,
-                "amount": amount,
-                "is_test": True  # Флаг тестового платежа
+                "confirmation_url": f"https://yoomoney.ru/quickpay/confirm.xml?receiver={YOOKASSA_SHOP_ID}&sum={amount}&label={payment_id}",
+                "amount": amount
             }
         except Exception as e:
-            logger.error(f"Local payment creation failed: {e}")
+            logger.error(f"Fallback failed: {e}")
             return None
-
-    async def check_payment_status(self, payment_id: str) -> Optional[str]:
-        """Проверка статуса платежа"""
-        if payment_id.startswith("test_"):
-            # Для тестовых платежей всегда возвращаем успех
-            return "succeeded"
 
 
 payment_manager = SimplePaymentManager()

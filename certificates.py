@@ -10,6 +10,7 @@ from fpdf import FPDF
 
 
 class CertificateState(StatesGroup):
+    email = State()
     waiting_payment = State()
 
 

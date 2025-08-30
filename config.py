@@ -22,8 +22,12 @@ WEBHOOK_PATH = "/webhook/yookassa"
 WEBHOOK_URL = f"https://{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBHOOK_SECRET = "your_webhook_secret_token"  # Сгенерируйте случайный токен
 
-IS_LOCAL = os.getenv("IS_LOCAL", "False").lower() == "true"
-LOCAL_TUNNEL_URL = "your-ngrok-url.ngrok.io"  # Замените на ваш ngrok URL
+# Добавьте настройки для чеков
+YOOKASSA_TAX_RATE = 1  # Ставка НДС (1 - без НДС, 2 - 0%, 3 - 10%, 4 - 20%, 5 - 10/110, 6 - 20/120)
+YOOKASSA_TAX_SYSTEM = 1  # Система налогообложения (1 - ОСН, 2 - УСН Доход, 3 - УСН Доход-Расход, 4 - ЕНВД, 5 - ЕСН, 6 - ПСН)
+
+IS_LOCAL = False  # True для локальной разработки
+LOCAL_TUNNEL_URL = "https://your-tunnel.ngrok.io"  # если используешь ngrok
 
 if IS_LOCAL:
     WEBHOOK_HOST = LOCAL_TUNNEL_URL

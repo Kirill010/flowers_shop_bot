@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
+from receipts import receipt_manager
 
 MAX_BONUS_PERCENTAGE = 0.3  # 30%
 BONUS_EARN_PERCENTAGE = 0.1  # 10%
@@ -679,69 +680,76 @@ async def cert_menu(message: Message):
     )
 
 
+# Для сертификатов
 @router.callback_query(F.data.startswith("cert_"))
 async def handle_certificate_purchase(callback: CallbackQuery, state: FSMContext):
-    """Обработка покупки сертификата"""
-    amount_str = callback.data.split("_")[1]
-    try:
-        amount = int(amount_str)
-
-        # Проверка минимальной суммы для ЮKassa (минимум 1 рубль)
-        if amount < 1:
-            await callback.answer("❌ Минимальная сумма - 1 рубль")
-            return
-
-        # Создаем платеж для сертификата
-        cert_code = f"CERT-{uuid.uuid4().hex[:8].upper()}"
-
-        # Упрощаем metadata для сертификата
-        simplified_metadata = {
-            "user_id": callback.from_user.id,
-            "cert_code": cert_code,
-            "phone": "9999999999",
-            "type": "certificate"
-        }
-
-        payment = await payment_manager.create_payment(
-            amount=amount,
-            description=f"Подарочный сертификат на {amount}₽",
-            metadata=simplified_metadata
-        )
-
-        if payment and payment.get("confirmation_url"):
-            await state.update_data(
-                payment_id=payment["id"],
-                cert_amount=amount,
-                cert_code=cert_code,
-                payment_url=payment["confirmation_url"]
-            )
-            await state.set_state(CertificateState.waiting_payment)
-
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💳 Оплатить сертификат", url=payment["confirmation_url"])],
-                [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_cert_payment_{payment['id']}")]
-            ])
-
-            await callback.message.answer(
-                f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
-                f"💳 Сумма к оплате: {amount} ₽\n"
-                f"🔗 Перейдите по ссылке для оплаты\n\n"
-                f"После оплаты нажмите «✅ Проверить оплату»",
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
-        else:
-            await callback.message.answer(
-                f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
-                "⚠️ Платежная система временно недоступна.\n"
-                "📞 Для покупки сертификата свяжитесь с менеджером.",
-                parse_mode="HTML"
-            )
-
-    except ValueError:
-        await callback.answer("❌ Неверный номинал сертификата")
-
+    """Обработка покупки сертификата с чеком"""
+    await callback.message.answer(
+        "📧 <b>Для отправки чека введите ваш email:</b>\n\n"
+        "На этот email будет отправлен электронный чек после оплаты.",
+        parse_mode="HTML"
+    )
+    await state.set_state(CertificateState.email)
+    await state.update_data(cert_amount=int(callback.data.split("_")[1]))
     await callback.answer()
+
+
+@router.message(CertificateState.email)
+async def process_certificate_email(message: Message, state: FSMContext):
+    """Обработка email для сертификата"""
+    email = message.text.strip()
+
+    if '@' not in email:
+        await message.answer("❌ Пожалуйста, введите корректный email адрес:")
+        return
+
+    data = await state.get_data()
+    amount = data['cert_amount']
+    cert_code = f"CERT-{uuid.uuid4().hex[:8].upper()}"
+
+    # Создаем платеж с чеком для сертификата
+    metadata = {
+        "user_id": message.from_user.id,
+        "cert_code": cert_code,
+        "type": "certificate",
+        "amount": amount,
+        "email": email
+    }
+
+    payment = await payment_manager.create_payment(
+        amount=amount,
+        description=f"Подарочный сертификат на {amount}₽",
+        metadata=metadata,
+        customer_email=email  # Добавьте этот параметр
+    )
+
+    if payment and payment.get("confirmation_url"):
+        await state.update_data(
+            payment_id=payment["id"],
+            cert_code=cert_code,
+            payment_url=payment["confirmation_url"],
+            customer_email=email
+        )
+        await state.set_state(CertificateState.waiting_payment)
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить сертификат", url=payment["confirmation_url"])],
+            [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_cert_payment_{payment['id']}")]
+        ])
+
+        await message.answer(
+            f"🎁 <b>Сертификат на {amount} ₽</b>\n\n"
+            f"💳 Сумма к оплате: {amount} ₽\n"
+            f"📧 Чек будет отправлен на: {email}\n"
+            f"🔗 Перейдите по ссылке для оплаты\n\n"
+            f"После оплаты нажмите «✅ Проверить оплату»",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(
+            "❌ Не удалось создать платеж. Пожалуйста, свяжитесь с менеджером."
+        )
 
 
 async def handle_certificate_selection(callback: CallbackQuery, state: FSMContext):
@@ -1561,13 +1569,34 @@ async def process_online_payment(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.in_(["pay_online", "pay_sbp"]))
 async def process_online_payment_selection(callback: CallbackQuery, state: FSMContext):
-    """Обработка выбора онлайн-оплаты (карта или СБП)"""
-    payment_method = callback.data.split("_")[1]  # online или sbp
+    """Обработка выбора онлайн-оплаты с запросом email для чека"""
+    payment_method = callback.data.split("_")[1]
     await state.update_data(payment_method=payment_method)
 
-    # Получаем данные заказа
+    await callback.message.answer(
+        "📧 <b>Для отправки чека введите ваш email:</b>\n\n"
+        "На этот email будет отправлен электронный чек после оплаты.",
+        parse_mode="HTML"
+    )
+    await state.set_state(OrderState.email)
+    await callback.answer()
+
+
+@router.message(OrderState.email)
+async def process_email_for_receipt(message: Message, state: FSMContext):
+    """Обработка email для чека"""
+    email = message.text.strip()
+
+    # Простая валидация email
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        await message.answer("❌ Пожалуйста, введите корректный email адрес:")
+        return
+
+    await state.update_data(customer_email=email)
+
+    # Продолжаем процесс оплаты
     data = await state.get_data()
-    user_id = callback.from_user.id
+    user_id = message.from_user.id
 
     # Рассчитываем итоговую сумму с учетом бонусов
     calculation = await calculate_order_total_with_bonuses(
@@ -1578,17 +1607,10 @@ async def process_online_payment_selection(callback: CallbackQuery, state: FSMCo
 
     total_amount = calculation['final_total']
 
-    # Сохраняем итоговую сумму
-    await state.update_data(
-        payment_amount=total_amount,
-        products_total=calculation['products_total'],
-        bonus_used=data.get('bonus_used', 0)
-    )
-
-    # Создаем платеж в ЮKassa
+    # Создаем платеж с чеком
     cart_items = get_cart(user_id)
 
-    # Формируем метаданные для платежа
+    # Формируем метаданные
     metadata = {
         "user_id": user_id,
         "name": data.get('name', ''),
@@ -1596,24 +1618,21 @@ async def process_online_payment_selection(callback: CallbackQuery, state: FSMCo
         "address": data.get('address', ''),
         "delivery_date": data.get('delivery_date', ''),
         "delivery_time": data.get('delivery_time', ''),
-        "payment_method": payment_method,
+        "payment_method": data.get('payment_method', ''),
         "delivery_type": data.get('delivery_type', 'delivery'),
         "delivery_cost": data.get('delivery_cost', 0),
         "bonus_used": data.get('bonus_used', 0),
         "cart_items": cart_items,
-        "type": "order"
+        "type": "order",
+        "email": email  # Сохраняем email в metadata
     }
 
-    # Упрощаем метаданные для YooKassa (ограничение на длину)
-    simplified_metadata = simplify_order_data(metadata)
-
     # Создаем платеж
-    payment_description = f"Заказ цветов на {total_amount}₽"
-
     payment = await payment_manager.create_payment(
         amount=total_amount,
-        description=payment_description,
-        metadata=simplified_metadata
+        description=f"Заказ цветов на {total_amount}₽",
+        metadata=metadata,
+        customer_email=email
     )
 
     if payment and payment.get("confirmation_url"):
@@ -1623,42 +1642,44 @@ async def process_online_payment_selection(callback: CallbackQuery, state: FSMCo
         )
         await state.set_state(OrderState.waiting_payment)
 
-        # Формируем клавиатуру с кнопкой оплаты
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment["confirmation_url"])],
             [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_payment_{payment['id']}")]
         ])
 
-        payment_method_name = "банковской картой" if payment_method == "online" else "через СБП"
-
-        await callback.message.answer(
-            f"💳 <b>Оплата {payment_method_name}</b>\n\n"
+        await message.answer(
+            f"💳 <b>Оплата банковской картой</b>\n\n"
             f"💰 Сумма к оплате: {total_amount} ₽\n"
+            f"📧 Чек будет отправлен на: {email}\n"
             f"🔗 Перейдите по ссылке для завершения оплаты\n\n"
             f"После успешной оплаты нажмите «✅ Проверить оплату»",
             reply_markup=kb,
             parse_mode="HTML"
         )
     else:
-        await callback.message.answer(
-            "❌ Не удалось создать платеж. Пожалуйста, попробуйте другой способ оплаты или свяжитесь с менеджером."
+        await message.answer(
+            "❌ Не удалось создать платеж. Пожалуйста, попробуйте другой способ оплаты."
         )
-
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("check_payment_"))
 async def check_payment_status(callback: CallbackQuery, state: FSMContext):
-    """Проверка статуса платежа"""
+    """Проверка статуса платежа с созданием чека"""
     payment_id = callback.data.split("_")[2]
 
-    # Проверяем статус через payment_manager
     status = await payment_manager.check_payment_status(payment_id)
 
-    if status == 'succeeded':
-        # Платеж успешен - создаем заказ
+    if status == "succeeded":
+        # Получаем данные
         data = await state.get_data()
         user_id = callback.from_user.id
+        email = data.get('customer_email')
+
+        # Создаем чек
+        success = await receipt_manager.create_receipt(payment_id, email)
+
+        if success:
+            await callback.message.answer("✅ Чек отправлен на ваш email!")
 
         # Создаем заказ
         order_id = create_order(
