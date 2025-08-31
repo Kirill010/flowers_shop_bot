@@ -13,7 +13,6 @@ import time
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 async def on_startup(bot: Bot, base_url: str):
     """Действия при запуске бота"""
     logger.info("Бот запускается...")
@@ -25,13 +24,11 @@ async def on_startup(bot: Bot, base_url: str):
     )
     logger.info(f"Вебхук установлен: {base_url}{WEBHOOK_PATH}")
 
-
 async def on_shutdown(bot: Bot):
     """Действия при остановке бота"""
     logger.info("Бот останавливается...")
     await bot.delete_webhook()
     logger.info("Вебхук удален")
-
 
 def start_ngrok_tunnel(port: int):
     """Запускает ngrok туннель"""
@@ -66,10 +63,21 @@ def start_ngrok_tunnel(port: int):
         logger.error(f"Ошибка запуска ngrok: {e}")
         return None, None
 
-
 def main():
     # Инициализация базы данных
     init_db()
+
+    # Запускаем ngrok туннель ПЕРВЫМ ДЕЛОМ
+    public_url, ngrok_process = start_ngrok_tunnel(WEBHOOK_PORT)
+
+    if not public_url:
+        logger.error("Не удалось запустить ngrok. Запускаем в режиме polling.")
+        # Запускаем в обычном режиме, если ngrok не работает
+        bot = Bot(token=BOT_TOKEN)
+        dp = Dispatcher()
+        dp.include_router(user_router)
+        asyncio.run(dp.start_polling(bot))
+        return
 
     # Создаем экземпляры бота и диспетчера
     bot = Bot(token=BOT_TOKEN)
@@ -79,18 +87,8 @@ def main():
     dp.include_router(user_router)
 
     # Регистрируем обработчики startup/shutdown
-    #dp.startup.register(on_startup)
-    dp.startup.register(lambda dispatcher: on_startup(bot, public_url))
-    dp.shutdown.register(on_shutdown)
-
-    # Запускаем ngrok туннель
-    public_url, ngrok_process = start_ngrok_tunnel(WEBHOOK_PORT)
-
-    if not public_url:
-        logger.error("Не удалось запустить ngrok. Запускаем в режиме polling.")
-        # Запускаем в обычном режиме, если ngrok не работает
-        asyncio.run(dp.start_polling(bot))
-        return
+    dp.startup.register(lambda: on_startup(bot, public_url))
+    dp.shutdown.register(lambda: on_shutdown(bot))
 
     # Создаем aiohttp приложение
     app = web.Application()
@@ -120,7 +118,6 @@ def main():
         # Останавливаем ngrok при завершении
         if ngrok_process:
             ngrok_process.terminate()
-
 
 if __name__ == "__main__":
     main()
