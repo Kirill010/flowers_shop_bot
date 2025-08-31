@@ -1,3 +1,5 @@
+import traceback
+
 from yookassa import Payment, Configuration
 import uuid
 import asyncio
@@ -63,6 +65,7 @@ class SimplePaymentManager:
                 }
             except Exception as e:
                 logger.error(f"Attempt {attempt + 1} failed: {e}")
+                logger.error(traceback.format_exc())
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay)
         return None
