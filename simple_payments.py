@@ -27,7 +27,7 @@ class SimplePaymentManager:
                     },
                     "confirmation": {
                         "type": "redirect",
-                        "return_url": "https://t.me/flowersstories_bot"
+                        "return_url": "https://forms.tildacdn.com/payment/yakassa/v3.0/"
                     },
                     "capture": True,
                     "description": description,

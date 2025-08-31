@@ -770,7 +770,8 @@ async def create_certificate_payment(user_id: int, amount: int, callback: Callba
             "amount": {"value": str(amount), "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                "return_url": "@flowersstories_bot"  # URL бота
+                #"return_url": "https://t.me/Therry_Voyager"  # URL бота
+                "return_url": "https://forms.tildacdn.com/payment/yakassa/v3.0/"  # URL бота
             },
             "capture": True,
             "description": f"Подарочный сертификат на {amount}₽",
@@ -2296,7 +2297,8 @@ async def create_yookassa_payment(callback: CallbackQuery, state: FSMContext):
             "amount": {"value": str(total), "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                "return_url": "https://t.me/Therry_Voyager"
+                #"return_url": "https://t.me/Therry_Voyager"
+                "return_url": "https://forms.tildacdn.com/payment/yakassa/v3.0/"
             },
             "capture": True,
             "description": f"Заказ #{payment_id}",
