@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Токен бота
-BOT_TOKEN = os.getenv("BOT_TOKEN", "your_bot_token")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8201157651:AAHIA7J5_NuRHhBmEEgB1H0vuXK4DnqBucI")
 
 # ID администратора
 ADMIN_ID = int(os.getenv("ADMIN_ID", "1095668090"))
@@ -16,8 +16,8 @@ ADMIN_ID2 = int(os.getenv("ADMIN_ID2", "905582217"))
 ADMINS = [ADMIN_ID, ADMIN_ID1, ADMIN_ID2]
 
 # ЮKassa
-YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "your_shop_id")
-YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "your_secret_key")
+YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "1037498")
+YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "live_jxIub1SHUSUh5F2hw_CjY2kK4a2Rc57yqHx5uSySQ34")
 
 required_vars = ['BOT_TOKEN', 'YOOKASSA_SHOP_ID', 'YOOKASSA_SECRET_KEY']
 missing_vars = [var for var in required_vars if not os.getenv(var)]
