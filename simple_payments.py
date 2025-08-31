@@ -18,6 +18,8 @@ class SimplePaymentManager:
         self.retry_delay = 2
 
     async def create_payment(self, amount: int, description: str, metadata: dict) -> dict:
+        logger.info(f"Создание платежа: {amount} RUB, {description}")
+
         for attempt in range(self.retry_attempts):
             try:
                 payment = Payment.create({
@@ -27,7 +29,7 @@ class SimplePaymentManager:
                     },
                     "confirmation": {
                         "type": "redirect",
-                        "return_url": "https://forms.tildacdn.com/payment/yakassa/v3.0/"
+                        "return_url": "https://t.me/flowersstories_bot"
                     },
                     "capture": True,
                     "description": description,
@@ -50,6 +52,8 @@ class SimplePaymentManager:
                     }
                 })
 
+                logger.info(f"Платеж создан: {payment.id}, статус: {payment.status}")
+
                 # Возвращаем правильную структуру
                 return {
                     "id": payment.id,
@@ -65,15 +69,16 @@ class SimplePaymentManager:
 
     async def check_payment_status(self, payment_id: str) -> Optional[str]:
         """Проверка статуса платежа в ЮKassa"""
-        for attempt in range(self.retry_attempts):
-            try:
-                payment = Payment.find_one(payment_id)
-                return payment.status
-            except Exception as e:
-                logger.error(f"Payment status check attempt {attempt + 1} failed: {e}")
-                if attempt < self.retry_attempts - 1:
-                    await asyncio.sleep(self.retry_delay)
-        return None
+        logger.info(f"Проверка статуса платежа: {payment_id}")
+
+        try:
+            loop = asyncio.get_event_loop()
+            payment = await loop.run_in_executor(None, lambda: Payment.find_one(payment_id))
+            logger.info(f"Статус платежа {payment_id}: {payment.status}")
+            return payment.status
+        except Exception as e:
+            logger.error(f"Ошибка проверки статуса: {e}")
+            return None
 
 
 payment_manager = SimplePaymentManager()

@@ -28,6 +28,7 @@ MAX_BONUS_PERCENTAGE = 0.3  # 30%
 BONUS_EARN_PERCENTAGE = 0.1  # 10%
 
 # Настройка логирования
+logging.basicConfig(level=logging.DEBUG)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -770,8 +771,7 @@ async def create_certificate_payment(user_id: int, amount: int, callback: Callba
             "amount": {"value": str(amount), "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                #"return_url": "https://t.me/Therry_Voyager"  # URL бота
-                "return_url": "https://forms.tildacdn.com/payment/yakassa/v3.0/"  # URL бота
+                "return_url": "https://t.me/flowersstories_bot"  # URL бота
             },
             "capture": True,
             "description": f"Подарочный сертификат на {amount}₽",
@@ -2297,8 +2297,7 @@ async def create_yookassa_payment(callback: CallbackQuery, state: FSMContext):
             "amount": {"value": str(total), "currency": "RUB"},
             "confirmation": {
                 "type": "redirect",
-                #"return_url": "https://t.me/Therry_Voyager"
-                "return_url": "https://forms.tildacdn.com/payment/yakassa/v3.0/"
+                "return_url": "https://t.me/Therry_Voyager"
             },
             "capture": True,
             "description": f"Заказ #{payment_id}",

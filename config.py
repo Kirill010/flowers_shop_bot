@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import sys
 from dotenv import load_dotenv
 
 # Загружаем переменные из .env
@@ -17,6 +18,14 @@ ADMINS = [ADMIN_ID, ADMIN_ID1, ADMIN_ID2]
 # ЮKassa
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "your_shop_id")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "your_secret_key")
+
+required_vars = ['BOT_TOKEN', 'YOOKASSA_SHOP_ID', 'YOOKASSA_SECRET_KEY']
+missing_vars = [var for var in required_vars if not os.getenv(var)]
+
+if missing_vars:
+    print(f"❌ Отсутствуют обязательные переменные окружения: {missing_vars}")
+    print("Добавьте их в .env файл или переменные окружения")
+    sys.exit(1)
 
 # Остальные настройки
 YOOKASSA_TAX_RATE = int(os.getenv("YOOKASSA_TAX_RATE", "1"))
