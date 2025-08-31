@@ -8,8 +8,7 @@ import sqlite3
 from keyboards import *
 from database import *
 from certificates import *
-from config import SHOP_INFO, BOT_TOKEN, DB_PATH, ADMINS
-from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+from config import *
 from yookassa import Configuration
 import os
 import json

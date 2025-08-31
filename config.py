@@ -1,3 +1,4 @@
+# config.py
 import os
 from pathlib import Path
 import sys
@@ -19,17 +20,15 @@ ADMINS = [ADMIN_ID, ADMIN_ID1, ADMIN_ID2]
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "1037498")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "live_jxIub1SHUSUh5F2hw_CjY2kK4a2Rc57yqHx5uSySQ34")
 
-required_vars = ['BOT_TOKEN', 'YOOKASSA_SHOP_ID', 'YOOKASSA_SECRET_KEY']
-missing_vars = [var for var in required_vars if not os.getenv(var)]
+# Webhook настройки
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "")  # Будет установлен автоматически через ngrok
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "flowersup123")
 
-if missing_vars:
-    print(f"❌ Отсутствуют обязательные переменные окружения: {missing_vars}")
-    print("Добавьте их в .env файл или переменные окружения")
-    sys.exit(1)
+# Порт для вебхука
+WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8000"))
 
-# Остальные настройки
-YOOKASSA_TAX_RATE = int(os.getenv("YOOKASSA_TAX_RATE", "1"))
-YOOKASSA_TAX_SYSTEM = int(os.getenv("YOOKASSA_TAX_SYSTEM", "1"))
+# Остальные настройки...
 DB_PATH = os.getenv("DB_PATH", "data/florist.db")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
