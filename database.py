@@ -22,7 +22,6 @@ def init_db():
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                email TEXT,
                 description TEXT,
                 full_description TEXT,
                 price REAL NOT NULL,
@@ -57,13 +56,13 @@ def init_db():
                 delivery_date TEXT,
                 delivery_time TEXT,
                 payment_method TEXT,
-                delivery_cost REAL DEFAULT 0,
+                delivery_cost INTEGER,
                 delivery_type TEXT,
+                bonus_used INTEGER,
                 status TEXT DEFAULT 'new',
-                bonus_used INTEGER DEFAULT 0,
+                points_used INTEGER DEFAULT 0,
                 discount_applied REAL DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                email TEXT
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """,
             # Таблица для системы лояльности
@@ -521,7 +520,7 @@ def add_product(name: str, description: str, full_description: str, price: float
 
 def create_order(user_id: int, name: str, phone: str, address: str,
                  delivery_date: str, delivery_time: str, payment: str,
-                 delivery_cost: float = 0, delivery_type: str = "delivery", email: str = None,
+                 delivery_cost: int = 0, delivery_type: str = "delivery",
                  bonus_used: int = 0) -> int:
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -555,11 +554,11 @@ def create_order(user_id: int, name: str, phone: str, address: str,
         cur.execute("""
             INSERT INTO orders 
             (user_id, items, total, customer_name, phone, address, 
-             delivery_date, delivery_time, payment_method, delivery_cost, email, 
+             delivery_date, delivery_time, payment_method, delivery_cost, 
              delivery_type, status, bonus_used)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, json.dumps(cart_items), final_total, name, phone, address,
-              delivery_date, delivery_time, payment, delivery_cost, email,
+              delivery_date, delivery_time, payment, delivery_cost,
               delivery_type, 'new', actual_bonus_used))
 
         order_id = cur.lastrowid
@@ -649,12 +648,7 @@ def get_delivered_orders(user_id: int) -> List[Dict]:
         return []
 
 
-def get_pending_payments(limit: int = 100) -> List[Dict]:
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM payments WHERE status = 'pending' ORDER BY created_at LIMIT ?", (limit,))
-        return [dict(r) for r in cur.fetchall()]
-
+# database.py - улучшаем функцию обновления статуса
 
 def update_order_status(order_id: int, status: str):
     """Обновляет статус заказа и записывает в историю"""
