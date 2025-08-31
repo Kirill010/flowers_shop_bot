@@ -26,7 +26,7 @@ def generate_certificate(amount: str, cert_code: str, filename: str):
 
     # Сумма
     pdf.set_font("DejaVu", "", 12)
-    pdf.cell(0, 8, f"Сумма: {amount} ₽", ln=True, align="C")
+    pdf.cell(0, 8, f"Сумма: {amount} RUB", ln=True, align="C")
 
     # Код
     pdf.cell(0, 8, f"Код: {cert_code}", ln=True, align="C")

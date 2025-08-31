@@ -157,32 +157,6 @@ def init_db():
                 username TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """,
-            # Новая таблица для вебхуков YooKassa
-            """
-            CREATE TABLE IF NOT EXISTS yookassa_webhooks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                webhook_id TEXT UNIQUE NOT NULL,
-                event_type TEXT NOT NULL,
-                url TEXT NOT NULL,
-                is_active BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
-            # Таблица для логов вебхуков
-            """
-            CREATE TABLE IF NOT EXISTS webhook_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                webhook_id TEXT,
-                event_type TEXT,
-                payment_id TEXT,
-                status_code INTEGER,
-                request_body TEXT,
-                response_text TEXT,
-                processed BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
             """
         ]
 
@@ -198,69 +172,13 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payments(payment_id)",
             "CREATE INDEX IF NOT EXISTS idx_loyalty_user_id ON loyalty_program(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_loyalty_history_user ON loyalty_history(user_id)",
-            "CREATE INDEX IF NOT EXISTS idx_loyalty_history_order ON loyalty_history(order_id)",
-            "CREATE INDEX IF NOT EXISTS idx_webhooks_event ON yookassa_webhooks(event_type)",
-            "CREATE INDEX IF NOT EXISTS idx_webhooks_active ON yookassa_webhooks(is_active)",
-            "CREATE INDEX IF NOT EXISTS idx_webhook_logs_payment ON webhook_logs(payment_id)",
-            "CREATE INDEX IF NOT EXISTS idx_webhook_logs_processed ON webhook_logs(processed)"
+            "CREATE INDEX IF NOT EXISTS idx_loyalty_history_order ON loyalty_history(order_id)"
         ]
 
         for index in indexes:
             cur.execute(index)
         # init_test_data()
         print("✅ База данных инициализирована")
-
-
-# Новые функции для работы с вебхуками
-def save_webhook_log(webhook_id: str, event_type: str, payment_id: str,
-                     status_code: int, request_body: str, response_text: str):
-    """Сохраняет лог вебхука"""
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO webhook_logs 
-            (webhook_id, event_type, payment_id, status_code, request_body, response_text)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (webhook_id, event_type, payment_id, status_code, request_body, response_text))
-        conn.commit()
-
-
-def get_unprocessed_webhooks():
-    """Получает необработанные вебхуки"""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM webhook_logs WHERE processed = FALSE ORDER BY created_at")
-        return [dict(row) for row in cur.fetchall()]
-
-
-def mark_webhook_processed(log_id: int):
-    """Помечает вебхук как обработанный"""
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("UPDATE webhook_logs SET processed = TRUE WHERE id = ?", (log_id,))
-        conn.commit()
-
-
-def register_yookassa_webhook(webhook_id: str, event_type: str, url: str):
-    """Регистрирует вебхук в базе данных"""
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT OR REPLACE INTO yookassa_webhooks 
-            (webhook_id, event_type, url, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        """, (webhook_id, event_type, url))
-        conn.commit()
-
-
-def get_active_webhooks():
-    """Получает активные вебхуки"""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM yookassa_webhooks WHERE is_active = TRUE")
-        return [dict(row) for row in cur.fetchall()]
 
 
 def calculate_order_total(cart_items: list, delivery_cost: int, bonus_used: int = 0, user_id: int = None) -> dict:

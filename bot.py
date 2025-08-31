@@ -5,7 +5,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from user_handlers import router as user_router
 from config import BOT_TOKEN, DEBUG
 from database import init_db
-from webhook_manager import webhook_manager
 from simple_payments import payment_manager
 
 logging.basicConfig(
@@ -23,13 +22,7 @@ async def on_startup():
     logger.info("📀 Initializing database...")
     init_db()
 
-    # Пытаемся настроить вебхуки, но не прерываем работу при ошибке
-    try:
-        logger.info("🌐 Setting up YooKassa webhooks...")
-        await webhook_manager.setup_webhooks()
-    except Exception as e:
-        logger.error(f"❌ Webhook setup failed: {e}")
-        logger.info("⚠️ Continuing without webhooks, using polling mode")
+    logger.info("🤖 Starting bot in polling mode...")
 
 
 async def main():

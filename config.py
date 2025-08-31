@@ -18,13 +18,6 @@ ADMINS = [ADMIN_ID, ADMIN_ID1, ADMIN_ID2]
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "your_shop_id")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "your_secret_key")
 
-# Настройки вебхуков
-WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
-WEBAPP_PORT = int(os.getenv("WEBAPP_PORT", "3001"))
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "yourdomain.com")
-WEBHOOK_URL = f"https://{WEBHOOK_HOST}"
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "your_webhook_secret")
-
 # Остальные настройки
 YOOKASSA_TAX_RATE = int(os.getenv("YOOKASSA_TAX_RATE", "1"))
 YOOKASSA_TAX_SYSTEM = int(os.getenv("YOOKASSA_TAX_SYSTEM", "1"))
@@ -33,6 +26,7 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 # Создаем необходимые директории
 Path("data").mkdir(exist_ok=True)
+Path("ssl").mkdir(exist_ok=True)
 Path("certificates").mkdir(exist_ok=True)
 
 # Информация о магазине
