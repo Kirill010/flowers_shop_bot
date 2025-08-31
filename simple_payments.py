@@ -149,8 +149,8 @@ class PaymentManager:
 
                     auth = HTTPBasicAuth(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY)
 
-                    response = requests.post(
-                        'https://api.yookassa.ru/v3/payments',
+                    response = requests.post(#'https://api.yookassa.ru/v3/payments',
+                        'https://forms.tildacdn.com/payment/yakassa/v3.0/',
                         auth=auth,
                         headers=headers,
                         json=payment_data,
