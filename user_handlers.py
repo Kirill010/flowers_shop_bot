@@ -1744,33 +1744,48 @@ async def check_payment_status(callback: CallbackQuery, state: FSMContext):
 
 async def notify_admins_about_new_order(order_id: int, user_id: int, order_data: dict):
     """Уведомление администраторов о новом заказе"""
-    cart_items = get_cart(user_id)
+    # Получаем заказ из базы, чтобы взять список товаров
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT items FROM orders WHERE id = ?", (order_id,))
+        result = cur.fetchone()
 
-    # Формируем сообщение для администратора
-    message = (
-        f"🛒 <b>НОВЫЙ ЗАКАЗ #{order_id}</b>\n\n"
-        f"👤 <b>Клиент:</b> {order_data.get('name', 'Не указано')}\n"
-        f"📞 <b>Телефон:</b> {order_data.get('phone', 'Не указан')}\n"
-        f"📍 <b>Адрес:</b> {order_data.get('address', 'Не указан')}\n"
-        f"📅 <b>Дата доставки:</b> {order_data.get('delivery_date', 'Не указана')}\n"
-        f"⏰ <b>Время:</b> {order_data.get('delivery_time', 'Не указано')}\n"
-        f"💳 <b>Способ оплаты:</b> {get_payment_method_name(order_data.get('payment_method', ''))}\n"
-        f"💰 <b>Сумма:</b> {order_data.get('payment_amount', 0)} ₽\n\n"
-        f"🛒 <b>Товары:</b>\n"
-    )
+    if not result:
+        logger.error(f"Заказ #{order_id} не найден при отправке уведомления")
+        return
 
-    # Добавляем товары в сообщение
+    try:
+        cart_items = json.loads(result['items'])  # Это сохранённый список товаров
+    except Exception as e:
+        logger.error(f"Ошибка парсинга items для заказа #{order_id}: {e}")
+        cart_items = []
+
+    message = (f"🛒 <b>НОВЫЙ ЗАКАЗ #{order_id}</b>\n"
+               f"👤 <b>Клиент:</b> {order_data.get('name', 'Не указано')}\n"
+               f"📞 <b>Телефон:</b> {order_data.get('phone', 'Не указан')}\n"
+               f"📍 <b>Адрес:</b> {order_data.get('address', 'Не указан')}\n"
+               f"📅 <b>Дата доставки:</b> {order_data.get('delivery_date', 'Не указана')}\n"
+               f"⏰ <b>Время:</b> {order_data.get('delivery_time', 'Не указано')}\n"
+               f"💳 <b>Способ оплаты:</b> {get_payment_method_name(order_data.get('payment_method', ''))}\n"
+               f"💰 <b>Сумма:</b> {order_data.get('payment_amount', 0)} ₽\n"
+               f"🛒 <b>Товары:</b>\n")
+
     if cart_items:
         for item in cart_items:
-            message += f"• {item['name']} ×{item['quantity']} - {item['price'] * item['quantity']} ₽\n"
+            name = item.get('name', 'Неизвестный товар')
+            price = item.get('price', 0)
+            quantity = item.get('quantity', 1)
+            total_item = price * quantity
+            message += f"• {name} ×{quantity} — {total_item} ₽\n"
     else:
-        message += "• Товары не найдены в корзине\n"
+        message += "❌ Товары не найдены в заказе.\n"
 
-    # Добавляем информацию о бонусах, если они использовались
     if order_data.get('bonus_used', 0) > 0:
-        message += f"\n💎 <b>Использовано бонусов:</b> {order_data.get('bonus_used', 0)} ₽"
+        message += f"💎 <b>Использовано бонусов:</b> {order_data.get('bonus_used', 0)} ₽\n"
 
     await notify_admins(message)
+
 
 @router.callback_query(F.data.in_(["pay_online", "pay_sbp", "pay_cash"]))
 async def process_payment_with_bonus_option(callback: CallbackQuery, state: FSMContext):
