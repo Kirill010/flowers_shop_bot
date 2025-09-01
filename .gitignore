@@ -4,3 +4,4 @@ images
 .idea
 *.db
 *.pdf
+__pycache__/
