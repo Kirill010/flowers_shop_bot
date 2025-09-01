@@ -1746,6 +1746,7 @@ async def notify_admins_about_new_order(order_id: int, user_id: int, order_data:
     """Уведомление администраторов о новом заказе"""
     cart_items = get_cart(user_id)
 
+    # Формируем сообщение для администратора
     message = (
         f"🛒 <b>НОВЫЙ ЗАКАЗ #{order_id}</b>\n\n"
         f"👤 <b>Клиент:</b> {order_data.get('name', 'Не указано')}\n"
@@ -1758,14 +1759,18 @@ async def notify_admins_about_new_order(order_id: int, user_id: int, order_data:
         f"🛒 <b>Товары:</b>\n"
     )
 
-    for item in cart_items:
-        message += f"• {item['name']} ×{item['quantity']} - {item['price'] * item['quantity']} ₽\n"
+    # Добавляем товары в сообщение
+    if cart_items:
+        for item in cart_items:
+            message += f"• {item['name']} ×{item['quantity']} - {item['price'] * item['quantity']} ₽\n"
+    else:
+        message += "• Товары не найдены в корзине\n"
 
+    # Добавляем информацию о бонусах, если они использовались
     if order_data.get('bonus_used', 0) > 0:
         message += f"\n💎 <b>Использовано бонусов:</b> {order_data.get('bonus_used', 0)} ₽"
 
     await notify_admins(message)
-
 
 @router.callback_query(F.data.in_(["pay_online", "pay_sbp", "pay_cash"]))
 async def process_payment_with_bonus_option(callback: CallbackQuery, state: FSMContext):
