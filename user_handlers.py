@@ -1666,6 +1666,7 @@ async def handle_payment_selection(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
 
 
+@router.callback_query(F.data == "pay_manager")
 async def process_online_payment(message: Message, state: FSMContext):
     """Обработка онлайн-оплаты с учетом бонусов"""
     data = await state.get_data()
@@ -1680,6 +1681,7 @@ async def process_online_payment(message: Message, state: FSMContext):
     await state.update_data(payment_amount=total, bonus_used=bonus_used)
 
 
+@router.callback_query(F.data.in_(["pay_online", "pay_sbp"]))
 async def process_online_payment_selection(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора онлайн-оплаты (карта или СБП)"""
     try:
