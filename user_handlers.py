@@ -3459,6 +3459,7 @@ async def get_bouquet_photo(message: Message, state: FSMContext):
 
     await message.answer("📝 Введите название букета:")
     await state.set_state(AdminState.name)
+    return
 
 
 @router.message(AdminState.name)
@@ -3466,6 +3467,7 @@ async def get_bouquet_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("📝 Введите категорию (букет/горшечный):")
     await state.set_state(AdminState.category)
+    return
 
 
 @router.message(AdminState.category)
@@ -3484,6 +3486,7 @@ async def get_bouquet_category(message: Message, state: FSMContext):
     await state.update_data(category=category)
     await message.answer("💬 Введите краткое описание:")
     await state.set_state(AdminState.description)
+    return
 
 
 @router.message(AdminState.description)
@@ -3491,6 +3494,7 @@ async def get_bouquet_desc(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     await message.answer("📄 Введите полное описание:")
     await state.set_state(AdminState.full_description)
+    return
 
 
 @router.message(AdminState.full_description)
@@ -3498,6 +3502,7 @@ async def get_bouquet_full_desc(message: Message, state: FSMContext):
     await state.update_data(full_description=message.text)
     await message.answer("💰 Введите цену (только число):")
     await state.set_state(AdminState.price)
+    return
 
 
 @router.message(AdminState.price)
