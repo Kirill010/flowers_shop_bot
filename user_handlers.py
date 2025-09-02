@@ -153,7 +153,7 @@ def simplify_order_data(data: dict) -> dict:
 async def calculate_order_total_with_bonuses(user_id: int, delivery_cost: int = 0, bonus_to_use: int = 0) -> dict:
     """Рассчитывает итоговую сумму заказа с учетом бонусов и скидок"""
     cart_items = get_cart(user_id)
-    products_total = sum(item['price'] * item['quantity'] for item in cart_items)
+    original_products_total = sum(item['price'] * item['quantity'] for item in cart_items)
 
     # Проверяем первый ли это заказ
     is_first = is_first_order(user_id)
@@ -161,15 +161,17 @@ async def calculate_order_total_with_bonuses(user_id: int, delivery_cost: int = 
 
     if is_first:
         # Применяем 10% скидку на товары (но не на доставку)
-        discount = int(products_total * FIRST_ORDER_DISCOUNT)
-        products_total -= discount
+        discount = int(original_products_total * FIRST_ORDER_DISCOUNT)
+
+    # Сумма товаров после скидки (но до применения бонусов)
+    products_total_after_discount = original_products_total - discount
 
     # Получаем информацию о бонусах пользователя
     bonus_info = get_bonus_info(user_id)
     available_bonus = bonus_info['current_bonus']
 
-    # Максимально можно использовать бонусов - 30% от суммы товаров
-    max_bonus_allowed = int(products_total * 0.3)
+    # Максимально можно использовать бонусов - 30% от суммы товаров после скидки
+    max_bonus_allowed = int(products_total_after_discount * MAX_BONUS_PERCENTAGE)
 
     # Если bonus_to_use не указан, используем доступный максимум
     if bonus_to_use == 0:
@@ -177,17 +179,19 @@ async def calculate_order_total_with_bonuses(user_id: int, delivery_cost: int = 
     else:
         actual_bonus_used = min(bonus_to_use, available_bonus, max_bonus_allowed)
 
-    final_total = max(0, products_total - actual_bonus_used + delivery_cost)
+    # Итоговая сумма: товары(со скидкой) - бонусы + доставка
+    final_total = max(0, products_total_after_discount - actual_bonus_used + delivery_cost)
 
     return {
-        'products_total': products_total + discount,  # Исходная сумма товаров
+        'original_products_total': original_products_total,  # Исходная сумма товаров
+        'products_total_after_discount': products_total_after_discount,  # Сумма после скидки
         'delivery_cost': delivery_cost,
         'available_bonus': available_bonus,
         'max_bonus_allowed': max_bonus_allowed,
         'bonus_used': actual_bonus_used,
-        'discount': discount,  # Добавляем информацию о скидке
-        'is_first_order': is_first,  # Добавляем флаг первого заказа
-        'final_total': final_total
+        'discount': discount,  # Сумма скидки
+        'is_first_order': is_first,  # Флаг первого заказа
+        'final_total': final_total  # Итоговая сумма к оплате
     }
 
 
@@ -2114,7 +2118,7 @@ async def show_order_summary(callback: CallbackQuery, state: FSMContext, total: 
         f"📅 <b>Дата:</b> {data.get('delivery_date', 'Не указана')}\n"
         f"⏰ <b>Время:</b> {data.get('delivery_time', 'Не указано')}\n"
         f"💳 <b>Оплата:</b> {get_payment_method_name(data.get('payment_method', ''))}\n"
-        f"💰 <b>Сумма товаров:</b> {products_total + discount} ₽\n"  # Показываем исходную сумму
+        f"💰 <b>Сумма товаров:</b> {calculation['original_products_total']} ₽\n"
         f"{discount_text}"
         f"{bonus_text}"
         f"💰 <b>Итого к оплате:</b> {total} ₽\n\n"
