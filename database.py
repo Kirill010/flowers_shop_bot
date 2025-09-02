@@ -3,6 +3,7 @@ import os
 import json
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
+from user_handlers import *
 
 DB_PATH = "data/florist.db"
 
@@ -475,7 +476,7 @@ def add_bonus_points(user_id: int, order_id: int, total_amount: float):
             total_spent = row['total_spent']
 
         # Рассчитываем бонусы: 5% от суммы
-        bonus_earned = int(total_amount * 0.05)  # Изменено с 0.1 на 0.05
+        bonus_earned = int(total_amount * 0.05)
         new_total_spent = total_spent + total_amount
         new_current_bonus = current_bonus + bonus_earned
 
@@ -518,10 +519,19 @@ def add_product(name: str, description: str, full_description: str, price: float
         return cur.lastrowid
 
 
+def is_first_order(user_id: int) -> bool:
+    """Проверяет, является ли заказ первым для пользователя"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM orders WHERE user_id = ?", (user_id,))
+        order_count = cur.fetchone()[0]
+        return order_count == 0
+
+
 def create_order(user_id: int, name: str, phone: str, address: str,
                  delivery_date: str, delivery_time: str, payment: str,
                  delivery_cost: int = 0, delivery_type: str = "delivery",
-                 bonus_used: int = 0) -> int:
+                 bonus_used: int = 0, discount: int = 0) -> int:
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -554,13 +564,12 @@ def create_order(user_id: int, name: str, phone: str, address: str,
         cur.execute("""
             INSERT INTO orders 
             (user_id, items, total, customer_name, phone, address, 
-             delivery_date, delivery_time, payment_method, delivery_cost, 
-             delivery_type, status, bonus_used)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            delivery_date, delivery_time, payment_method, delivery_cost, 
+            delivery_type, status, bonus_used, discount_applied)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, json.dumps(cart_items), final_total, name, phone, address,
-              delivery_date, delivery_time, payment, delivery_cost,
-              delivery_type, 'new', actual_bonus_used))
-
+            delivery_date, delivery_time, payment, delivery_cost,
+            delivery_type, 'new', actual_bonus_used, discount))  # Добавляем discount
         order_id = cur.lastrowid
 
         # Списываем бонусы, если они использовались
@@ -584,7 +593,7 @@ def create_order(user_id: int, name: str, phone: str, address: str,
                   f"Списание за заказ #{order_id}", user_id))
 
         # Начисляем новые бонусы (5% от итоговой суммы после скидки)
-        bonus_earned = int(final_total * 0.05)  # Изменено с 0.1 на 0.05
+        bonus_earned = int(final_total * 0.05)
         if bonus_earned > 0:
             cur.execute("""
                 UPDATE loyalty_program 

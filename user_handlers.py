@@ -24,7 +24,8 @@ import random
 from datetime import datetime, timedelta
 
 MAX_BONUS_PERCENTAGE = 0.3  # 30%
-BONUS_EARN_PERCENTAGE = 0.05  # 5%
+BONUS_EARN_PERCENTAGE = 0.05  # 10%
+FIRST_ORDER_DISCOUNT = 0.1  # 10% скидка на первый заказ
 
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG)
@@ -150,9 +151,18 @@ def simplify_order_data(data: dict) -> dict:
 
 
 async def calculate_order_total_with_bonuses(user_id: int, delivery_cost: int = 0, bonus_to_use: int = 0) -> dict:
-    """Рассчитывает итоговую сумму заказа с учетом бонусов"""
+    """Рассчитывает итоговую сумму заказа с учетом бонусов и скидок"""
     cart_items = get_cart(user_id)
     products_total = sum(item['price'] * item['quantity'] for item in cart_items)
+
+    # Проверяем первый ли это заказ
+    is_first = is_first_order(user_id)
+    discount = 0
+
+    if is_first:
+        # Применяем 10% скидку на товары (но не на доставку)
+        discount = int(products_total * FIRST_ORDER_DISCOUNT)
+        products_total -= discount
 
     # Получаем информацию о бонусах пользователя
     bonus_info = get_bonus_info(user_id)
@@ -170,11 +180,13 @@ async def calculate_order_total_with_bonuses(user_id: int, delivery_cost: int = 
     final_total = max(0, products_total - actual_bonus_used + delivery_cost)
 
     return {
-        'products_total': products_total,
+        'products_total': products_total + discount,  # Исходная сумма товаров
         'delivery_cost': delivery_cost,
         'available_bonus': available_bonus,
         'max_bonus_allowed': max_bonus_allowed,
         'bonus_used': actual_bonus_used,
+        'discount': discount,  # Добавляем информацию о скидке
+        'is_first_order': is_first,  # Добавляем флаг первого заказа
         'final_total': final_total
     }
 
@@ -197,18 +209,21 @@ async def apply_bonus_to_order(user_id: int, order_id: int, bonus_used: int, ord
     return False
 
 
-async def send_bonus_notification(user_id: int, order_id: int, bonus_used: int, bonus_earned: int):
+async def send_bonus_notification(user_id: int, order_id: int, bonus_used: int, bonus_earned: int, discount: int = 0):
     """Отправляет уведомление о использовании и начислении бонусов"""
     try:
         text = (
             f"🎉 <b>Заказ #{order_id} оформлен!</b>\n\n"
         )
 
+        if discount > 0:
+            text += f"🎉 <b>Скидка на первый заказ:</b> -{discount} ₽\n"
+
         if bonus_used > 0:
             text += f"💎 <b>Использовано бонусов:</b> {bonus_used} ₽\n"
 
         if bonus_earned > 0:
-            text += f"💎 <b>Начислено бонусов:</b> {bonus_earned} ₽ (10% от суммы заказа)\n"
+            text += f"💎 <b>Начислено бонусов:</b> {bonus_earned} ₽ (5% от суммы заказа)\n"
 
         # Получаем информацию о заказе для отображения итоговой суммы
         orders = get_user_orders(user_id)
@@ -229,11 +244,9 @@ async def send_bonus_notification(user_id: int, order_id: int, bonus_used: int, 
 async def start_cmd(message: Message):
     """Обработчик команды /start - приветствие и главное меню"""
     await message.answer(
-        f"Привет! 👋 Рады видеть вас в <b>Лавке цветочных историй</b>! 🌸\n\n"
-        "Создаем прекрасные букеты и дарим выгоду нашим гостям:\n\n"
-        "💐 Дарим скидку 10% на первый заказ!\n"
-        "🎁 Подарочные сертификаты — выбор тех, кто дарит свободу выбора.\n"
-        "💰 Копите бонусы (5% с покупки) и оплачивайте ими до 30% следующего букета!!\n\n"
+        f"Добро пожаловать в <b>{SHOP_INFO['name']}</b>! 🌸\n"
+        "Каждый день новые букеты от наших флористов!\n"
+        "Выберите действие:\n\n"
         "Для справочника напишите команду /help",
         reply_markup=main_menu,
         parse_mode="HTML"
@@ -1401,6 +1414,16 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Некоторые товары отсутствуют в наличии.")
         return
 
+    # Рассчитываем сумму с учетом скидок и бонусов
+    calculation = await calculate_order_total_with_bonuses(callback.from_user.id)
+
+    await state.update_data(
+        products_total=calculation['products_total'] + calculation['discount'],  # Исходная сумма
+        bonus_used=0,
+        discount=calculation['discount'],
+        is_first_order=calculation['is_first_order']
+    )
+
     # Рассчитываем сумму
     products_total = sum(item['price'] * item['quantity'] for item in cart_items)
 
@@ -2057,10 +2080,14 @@ async def process_certificate_code(message: Message, state: FSMContext):
 
 
 async def show_order_summary(callback: CallbackQuery, state: FSMContext, total: float):
-    """Показывает сводку заказа с информацией о бонусах"""
     data = await state.get_data()
     bonus_used = data.get('bonus_used', 0)
     products_total = data.get('products_total', total)
+    discount = data.get('discount', 0)
+    is_first_order = data.get('is_first_order', False)
+
+    # Добавляем информацию о скидке
+    discount_text = f"🎉 <b>Скидка 10% на первый заказ:</b> -{discount} ₽\n" if discount > 0 else ""
 
     delivery_type = data.get('delivery_type', 'delivery')
     delivery_type_text = "Самовывоз" if delivery_type == "pickup" else "Доставка"
@@ -2087,7 +2114,10 @@ async def show_order_summary(callback: CallbackQuery, state: FSMContext, total: 
         f"📅 <b>Дата:</b> {data.get('delivery_date', 'Не указана')}\n"
         f"⏰ <b>Время:</b> {data.get('delivery_time', 'Не указано')}\n"
         f"💳 <b>Оплата:</b> {get_payment_method_name(data.get('payment_method', ''))}\n"
-        f"{summary_text}"
+        f"💰 <b>Сумма товаров:</b> {products_total + discount} ₽\n"  # Показываем исходную сумму
+        f"{discount_text}"
+        f"{bonus_text}"
+        f"💰 <b>Итого к оплате:</b> {total} ₽\n\n"
         "✅ Все верно? Подтвердите заказ:"
     )
 
@@ -2581,8 +2611,8 @@ async def show_bonus_help(callback: CallbackQuery):
         "💎 <b>Как работает бонусная система?</b>\n\n"
 
         "🎁 <b>Начисление бонусов:</b>\n"
-        "• За каждый заказ начисляем <b>10% от суммы</b> в бонусах\n"
-        "• Например: заказ на 2000 ₽ = 200 бонусов (2000 × 10%)\n"
+        "• За каждый заказ начисляем <b>5% от суммы</b> в бонусах\n"
+        "• Например: заказ на 2000 ₽ = 100 бонусов (2000 × 5%)\n"
         "• Бонусы начисляются после подтверждения заказа\n\n"
 
         "💰 <b>Использование бонусов:</b>\n"
@@ -2590,12 +2620,15 @@ async def show_bonus_help(callback: CallbackQuery):
         "• Можно оплатить <b>до 30% стоимости</b> следующего заказа\n"
         "• Например: заказ на 3000 ₽ → макс. 900 бонусов (30%)\n\n"
 
+        "🎉 <b>Специальное предложение:</b>\n"
+        "• <b>10% скидка на первый заказ!</b> (действует автоматически)\n\n"
+
         "📋 <b>Пример расчета:</b>\n"
         "• Сумма заказа: 5000 ₽\n"
         "• Макс. бонусов к списанию: 1500 ₽ (30%)\n"
         "• Если у вас 2000 бонусов → используете 1500 ₽\n"
         "• Итог к оплате: 3500 ₽ (5000 - 1500)\n"
-        "• + начислится 350 бонусов (10% от 3500 ₽)\n\n"
+        "• + начислится 175 бонусов (5% от 3500 ₽)\n\n"
 
         "⭐ <b>Преимущества:</b>\n"
         "• Бонусы не сгорают\n"
@@ -3461,13 +3494,11 @@ async def get_bouquet_photo(message: Message, state: FSMContext):
     await state.set_state(AdminState.name)
 
 
-
 @router.message(AdminState.name)
 async def get_bouquet_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("📝 Введите категорию (букет/горшечный):")
     await state.set_state(AdminState.category)
-
 
 
 @router.message(AdminState.category)
@@ -3488,7 +3519,6 @@ async def get_bouquet_category(message: Message, state: FSMContext):
     await state.set_state(AdminState.description)
 
 
-
 @router.message(AdminState.description)
 async def get_bouquet_desc(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
@@ -3496,13 +3526,11 @@ async def get_bouquet_desc(message: Message, state: FSMContext):
     await state.set_state(AdminState.full_description)
 
 
-
 @router.message(AdminState.full_description)
 async def get_bouquet_full_desc(message: Message, state: FSMContext):
     await state.update_data(full_description=message.text)
     await message.answer("💰 Введите цену (только число):")
     await state.set_state(AdminState.price)
-
 
 
 @router.message(AdminState.price)
