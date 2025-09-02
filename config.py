@@ -20,6 +20,9 @@ ADMINS = [ADMIN_ID, ADMIN_ID1, ADMIN_ID2]
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "1037498")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "live_jxIub1SHUSUh5F2hw_CjY2kK4a2Rc57yqHx5uSySQ34")
 
+YOOKASSA_TAX_RATE = os.getenv("YOOKASSA_TAX_RATE", "1")
+YOOKASSA_TAX_SYSTEM = os.getenv("YOOKASSA_TAX_SYSTEM", "1")
+
 # Webhook настройки
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "")  # Будет установлен автоматически через ngrok
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
