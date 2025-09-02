@@ -3459,7 +3459,7 @@ async def get_bouquet_photo(message: Message, state: FSMContext):
 
     await message.answer("📝 Введите название букета:")
     await state.set_state(AdminState.name)
-    return
+
 
 
 @router.message(AdminState.name)
