@@ -1,3 +1,4 @@
+import math
 import sqlite3
 import os
 import json
@@ -476,7 +477,7 @@ def add_bonus_points(user_id: int, order_id: int, total_amount: float):
             total_spent = row['total_spent']
 
         # Рассчитываем бонусы: 5% от суммы
-        bonus_earned = int(total_amount * 0.05)
+        bonus_earned = round(total_amount * 0.05)
         new_total_spent = total_spent + total_amount
         new_current_bonus = current_bonus + bonus_earned
 
@@ -568,8 +569,8 @@ def create_order(user_id: int, name: str, phone: str, address: str,
             delivery_type, status, bonus_used, discount_applied)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, json.dumps(cart_items), final_total, name, phone, address,
-            delivery_date, delivery_time, payment, delivery_cost,
-            delivery_type, 'new', actual_bonus_used, discount))  # Добавляем discount
+              delivery_date, delivery_time, payment, delivery_cost,
+              delivery_type, 'new', actual_bonus_used, discount))  # Добавляем discount
         order_id = cur.lastrowid
 
         # Списываем бонусы, если они использовались
