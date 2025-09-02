@@ -3467,7 +3467,7 @@ async def get_bouquet_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("📝 Введите категорию (букет/горшечный):")
     await state.set_state(AdminState.category)
-    return
+
 
 
 @router.message(AdminState.category)
