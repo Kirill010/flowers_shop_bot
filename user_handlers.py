@@ -1426,36 +1426,29 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("❌ Произошла ошибка при расчёте суммы заказа. Попробуйте позже.")
         return
 
+    # Сохраняем ВСЕ данные расчета в state
     await state.update_data(
-        products_total=calculation['products_total'] + calculation['discount'],  # Исходная сумма
-        bonus_used=0,
+        original_products_total=calculation['original_products_total'],  # Исходная сумма товаров
+        products_total_after_discount=calculation['products_total_after_discount'],  # Сумма после скидки
         discount=calculation['discount'],
-        is_first_order=calculation['is_first_order']
-    )
-
-    # Рассчитываем сумму
-    products_total = sum(item['price'] * item['quantity'] for item in cart_items)
-
-    # Проверяем доступные бонусы
-    bonus_info = get_bonus_info(callback.from_user.id)
-    max_bonus_allowed = int(products_total * 0.3)
-    available_bonus = min(bonus_info['current_bonus'], max_bonus_allowed)
-
-    await state.update_data(
-        products_total=products_total,
-        bonus_used=0
+        is_first_order=calculation['is_first_order'],
+        available_bonus=calculation['available_bonus'],
+        max_bonus_allowed=calculation['max_bonus_allowed'],
+        bonus_used=0,  # Пока не использовали бонусы
+        delivery_cost=calculation.get('delivery_cost', 0)  # Добавляем стоимость доставки
     )
 
     # Предлагаем использовать бонусы, если они есть
-    if available_bonus > 0:
+    if calculation['available_bonus'] > 0 and calculation['max_bonus_allowed'] > 0:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"💎 Использовать бонусы (до {available_bonus}₽)", callback_data="use_bonus")],
+            [InlineKeyboardButton(text=f"💎 Использовать бонусы (до {calculation['max_bonus_allowed']}₽)",
+                                  callback_data="use_bonus")],
             [InlineKeyboardButton(text="💳 Без бонусов", callback_data="skip_bonus")]
         ])
 
         await callback.message.answer(
-            f"💎 <b>У вас есть {bonus_info['current_bonus']}₽ бонусов</b>\n"
-            f"Можно использовать: до {available_bonus}₽ (30% от заказа)\n\n"
+            f"💎 <b>У вас есть {calculation['available_bonus']}₽ бонусов</b>\n"
+            f"Можно использовать: до {calculation['max_bonus_allowed']}₽ (30% от заказа)\n\n"
             "Хотите использовать бонусы для оплаты?",
             reply_markup=kb,
             parse_mode="HTML"
@@ -1463,6 +1456,7 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
+    # Если бонусов нет, сразу переходим к вводу имени
     await callback.message.answer("👤 Введите ваше имя:")
     await state.set_state(OrderState.name)
     await callback.answer()
