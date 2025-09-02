@@ -1618,6 +1618,54 @@ async def get_delivery_time(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+# --- ОБРАБОТЧИКИ СПОСОБОВ ОПЛАТЫ ---
+@router.callback_query(F.data.in_(["pay_online", "pay_sbp", "pay_cash", "pay_cert", "pay_manager"]))
+async def handle_payment_selection(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора способа оплаты"""
+    try:
+        # Получаем выбранный метод оплаты
+        payment_method = callback.data.split("_")[1] if "_" in callback.data else callback.data.replace("pay_", "")
+        await state.update_data(payment_method=payment_method)
+
+        # Получаем данные из state
+        data = await state.get_data()
+        user_id = callback.from_user.id
+
+        # Рассчитываем итоговую сумму
+        calculation = await calculate_order_total_with_bonuses(
+            user_id,
+            data.get('delivery_cost', 0),
+            data.get('bonus_used', 0)
+        )
+
+        total_amount = calculation['final_total']
+
+        # Сохраняем итоговую сумму
+        await state.update_data(
+            payment_amount=total_amount,
+            original_products_total=calculation['original_products_total'],
+            discount=calculation['discount']
+        )
+
+        # Обрабатываем разные способы оплаты
+        if payment_method in ['online', 'sbp']:
+            await process_online_payment_selection(callback, state)
+        elif payment_method == 'cash':
+            await process_cash_payment(callback, state)
+        elif payment_method == 'cert':
+            await process_certificate_payment(callback, state)
+        elif payment_method == 'manager':
+            await process_manager_payment(callback, state)
+
+    except Exception as e:
+        logger.error(f"Ошибка при выборе способа оплаты: {e}")
+        await callback.message.answer(
+            "❌ Произошла ошибка при обработке оплаты. Попробуйте еще раз или свяжитесь с менеджером."
+        )
+    finally:
+        await callback.answer()
+
+
 async def process_online_payment(message: Message, state: FSMContext):
     """Обработка онлайн-оплаты с учетом бонусов"""
     data = await state.get_data()
@@ -1632,142 +1680,141 @@ async def process_online_payment(message: Message, state: FSMContext):
     await state.update_data(payment_amount=total, bonus_used=bonus_used)
 
 
-@router.callback_query(F.data.in_(["pay_online", "pay_sbp"]))
 async def process_online_payment_selection(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора онлайн-оплаты (карта или СБП)"""
-    payment_method = callback.data.split("_")[1]  # online или sbp
-    await state.update_data(payment_method=payment_method)
+    try:
+        data = await state.get_data()
+        payment_method = data.get('payment_method', 'online')
+        user_id = callback.from_user.id
 
-    # Получаем данные заказа
-    data = await state.get_data()
-    user_id = callback.from_user.id
-
-    # Рассчитываем итоговую сумму с учетом бонусов
-    calculation = await calculate_order_total_with_bonuses(
-        user_id,
-        data.get('delivery_cost', 0),
-        data.get('bonus_used', 0)
-    )
-
-    total_amount = calculation['final_total']
-
-    # Сохраняем итоговую сумму
-    await state.update_data(
-        payment_amount=total_amount,
-        products_total=calculation['products_total'],
-        bonus_used=data.get('bonus_used', 0)
-    )
-
-    # Создаем платеж в ЮKassa
-    cart_items = get_cart(user_id)
-
-    # Формируем метаданные для платежа
-    metadata = {
-        "user_id": user_id,
-        "name": data.get('name', ''),
-        "phone": data.get('phone', ''),
-        "address": data.get('address', ''),
-        "delivery_date": data.get('delivery_date', ''),
-        "delivery_time": data.get('delivery_time', ''),
-        "payment_method": payment_method,
-        "delivery_type": data.get('delivery_type', 'delivery'),
-        "delivery_cost": data.get('delivery_cost', 0),
-        "bonus_used": data.get('bonus_used', 0),
-        "cart_items": cart_items,
-        "type": "order"
-    }
-
-    # Упрощаем метаданные для YooKassa (ограничение на длину)
-    simplified_metadata = simplify_order_data(metadata)
-
-    # Создаем платеж
-    payment_description = f"Заказ цветов на {total_amount}₽"
-
-    payment = await payment_manager.create_payment(
-        amount=total_amount,
-        description=payment_description,
-        metadata=simplified_metadata
-    )
-
-    if payment and payment.get("confirmation_url"):
-        await state.update_data(
-            payment_id=payment["id"],
-            payment_url=payment["confirmation_url"]
+        # Рассчитываем итоговую сумму
+        calculation = await calculate_order_total_with_bonuses(
+            user_id,
+            data.get('delivery_cost', 0),
+            data.get('bonus_used', 0)
         )
-        await state.set_state(OrderState.waiting_payment)
 
-        # Формируем клавиатуру с кнопкой оплаты
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment["confirmation_url"])],
-            [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_payment_{payment['id']}")]
-        ])
+        total_amount = calculation['final_total']
 
-        payment_method_name = "банковской картой" if payment_method == "online" else "через СБП"
+        # Создаем платеж в ЮKassa
+        cart_items = get_cart(user_id)
 
+        # Формируем метаданные для платежа
+        metadata = {
+            "user_id": user_id,
+            "name": data.get('name', ''),
+            "phone": data.get('phone', ''),
+            "address": data.get('address', ''),
+            "delivery_date": data.get('delivery_date', ''),
+            "delivery_time": data.get('delivery_time', ''),
+            "payment_method": payment_method,
+            "delivery_type": data.get('delivery_type', 'delivery'),
+            "delivery_cost": data.get('delivery_cost', 0),
+            "bonus_used": data.get('bonus_used', 0),
+            "cart_items": cart_items,
+            "type": "order"
+        }
+
+        # Упрощаем метаданные для YooKassa
+        simplified_metadata = simplify_order_data(metadata)
+
+        # Создаем платеж
+        payment_description = f"Заказ цветов на {total_amount}₽"
+
+        payment = await payment_manager.create_payment(
+            amount=total_amount,
+            description=payment_description,
+            metadata=simplified_metadata
+        )
+
+        if payment and payment.get("confirmation_url"):
+            await state.update_data(
+                payment_id=payment["id"],
+                payment_url=payment["confirmation_url"]
+            )
+            await state.set_state(OrderState.waiting_payment)
+
+            # Формируем клавиатуру с кнопкой оплаты
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment["confirmation_url"])],
+                [InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_payment_{payment['id']}")]
+            ])
+
+            payment_method_name = "банковской картой" if payment_method == "online" else "через СБП"
+
+            await callback.message.answer(
+                f"💳 <b>Оплата {payment_method_name}</b>\n\n"
+                f"💰 Сумма к оплате: {total_amount} ₽\n"
+                f"🔗 Перейдите по ссылке для завершения оплаты\n\n"
+                f"После успешной оплаты нажмите «✅ Проверить оплату»",
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.answer(
+                "❌ Не удалось создать платеж. Пожалуйста, попробуйте другой способ оплаты или свяжитесь с менеджером."
+            )
+
+    except Exception as e:
+        logger.error(f"Ошибка в process_online_payment_selection: {e}")
         await callback.message.answer(
-            f"💳 <b>Оплата {payment_method_name}</b>\n\n"
-            f"💰 Сумма к оплате: {total_amount} ₽\n"
-            f"🔗 Перейдите по ссылке для завершения оплаты\n\n"
-            f"После успешной оплаты нажмите «✅ Проверить оплату»",
-            reply_markup=kb,
-            parse_mode="HTML"
+            "❌ Произошла ошибка при создании платежа. Попробуйте другой способ оплаты."
         )
-    else:
-        await callback.message.answer(
-            "❌ Не удалось создать платеж. Пожалуйста, попробуйте другой способ оплаты или свяжитесь с менеджером."
-        )
-
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("check_payment_"))
 async def check_payment_status(callback: CallbackQuery, state: FSMContext):
     """Проверка статуса платежа"""
-    payment_id = callback.data.split("_")[2]
+    try:
+        payment_id = callback.data.split("_")[2]
 
-    # Проверяем статус через payment_manager
-    status = await payment_manager.check_payment_status(payment_id)
+        # Проверяем статус через payment_manager
+        status = await payment_manager.check_payment_status(payment_id)
 
-    if status == 'succeeded':
-        # Платеж успешен - создаем заказ
-        data = await state.get_data()
-        user_id = callback.from_user.id
+        if status == 'succeeded':
+            # Платеж успешен - создаем заказ
+            data = await state.get_data()
+            user_id = callback.from_user.id
 
-        # Создаем заказ
-        order_id = create_order(
-            user_id=user_id,
-            name=data.get('name', ''),
-            phone=data.get('phone', ''),
-            address=data.get('address', ''),
-            delivery_date=data.get('delivery_date', ''),
-            delivery_time=data.get('delivery_time', ''),
-            payment=data.get('payment_method', 'online'),
-            delivery_cost=data.get('delivery_cost', 0),
-            delivery_type=data.get('delivery_type', 'delivery'),
-            bonus_used=data.get('bonus_used', 0)
-        )
-
-        if order_id != -1:
-            await callback.message.answer(
-                f"✅ <b>Оплата принята!</b>\n\n"
-                f"Заказ #{order_id} успешно оформлен.\n"
-                f"Менеджер свяжется с вами для подтверждения.",
-                parse_mode="HTML"
+            # Создаем заказ
+            order_id = create_order(
+                user_id=user_id,
+                name=data.get('name', ''),
+                phone=data.get('phone', ''),
+                address=data.get('address', ''),
+                delivery_date=data.get('delivery_date', ''),
+                delivery_time=data.get('delivery_time', ''),
+                payment=data.get('payment_method', 'online'),
+                delivery_cost=data.get('delivery_cost', 0),
+                delivery_type=data.get('delivery_type', 'delivery'),
+                bonus_used=data.get('bonus_used', 0)
             )
 
-            # Отправляем уведомление администраторам
-            await notify_admins_about_new_order(order_id, user_id, data)
+            if order_id != -1:
+                await callback.message.answer(
+                    f"✅ <b>Оплата принята!</b>\n\n"
+                    f"Заказ #{order_id} успешно оформлен.\n"
+                    f"Менеджер свяжется с вами для подтверждения.",
+                    parse_mode="HTML"
+                )
 
-            await state.clear()
+                # Отправляем уведомление администраторам
+                await notify_admins_about_new_order(order_id, user_id, data)
+
+                await state.clear()
+            else:
+                await callback.message.answer(
+                    "❌ Ошибка при создании заказа. Пожалуйста, свяжитесь с менеджером."
+                )
+
+        elif status == 'pending':
+            await callback.answer("⏳ Платеж еще обрабатывается. Попробуйте через минуту.")
         else:
-            await callback.message.answer(
-                "❌ Ошибка при создании заказа. Пожалуйста, свяжитесь с менеджером."
-            )
+            await callback.answer("❌ Платеж не прошел. Попробуйте еще раз или выберите другой способ оплаты.")
 
-    elif status == 'pending':
-        await callback.answer("⏳ Платеж еще обрабатывается. Попробуйте через минуту.")
-    else:
-        await callback.answer("❌ Платеж не прошел. Попробуйте еще раз или выберите другой способ оплаты.")
+    except Exception as e:
+        logger.error(f"Ошибка при проверке платежа: {e}")
+        await callback.answer("❌ Ошибка при проверке статуса платежа.")
 
 
 async def notify_admins_about_new_order(order_id: int, user_id: int, order_data: dict):
