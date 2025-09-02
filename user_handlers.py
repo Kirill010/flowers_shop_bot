@@ -2086,7 +2086,7 @@ async def process_certificate_code(message: Message, state: FSMContext):
 async def show_order_summary(callback: CallbackQuery, state: FSMContext, total: float):
     data = await state.get_data()
     bonus_used = data.get('bonus_used', 0)
-    products_total = data.get('products_total', total)
+    original_products_total = data.get('original_products_total', total + bonus_used)  # Восстанавливаем исходную сумму
     discount = data.get('discount', 0)
     is_first_order = data.get('is_first_order', False)
 
@@ -2102,13 +2102,6 @@ async def show_order_summary(callback: CallbackQuery, state: FSMContext, total: 
     # Добавляем информацию о бонусах
     bonus_text = f"💎 <b>Использовано бонусов:</b> {bonus_used} ₽\n" if bonus_used > 0 else ""
 
-    # Показываем разбивку суммы
-    summary_text = (
-        f"💰 <b>Сумма товаров:</b> {products_total} ₽\n"
-        f"{bonus_text}"
-        f"💰 <b>Итого к оплате:</b> {total} ₽\n\n"
-    )
-
     order_summary = (
         "📋 <b>Сводка заказа</b>\n\n"
         f"👤 <b>Имя:</b> {data.get('name', 'Не указано')}\n"
@@ -2118,7 +2111,7 @@ async def show_order_summary(callback: CallbackQuery, state: FSMContext, total: 
         f"📅 <b>Дата:</b> {data.get('delivery_date', 'Не указана')}\n"
         f"⏰ <b>Время:</b> {data.get('delivery_time', 'Не указано')}\n"
         f"💳 <b>Оплата:</b> {get_payment_method_name(data.get('payment_method', ''))}\n"
-        f"💰 <b>Сумма товаров:</b> {calculation['original_products_total']} ₽\n"
+        f"💰 <b>Сумма товаров:</b> {original_products_total} ₽\n"
         f"{discount_text}"
         f"{bonus_text}"
         f"💰 <b>Итого к оплате:</b> {total} ₽\n\n"
