@@ -457,7 +457,7 @@ def clear_cart(user_id: int):
 
 
 def add_bonus_points(user_id: int, order_id: int, total_amount: float):
-    """Начисляет бонусы (10% от суммы заказа)"""
+    """Начисляет бонусы (5% от суммы заказа)"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -474,8 +474,8 @@ def add_bonus_points(user_id: int, order_id: int, total_amount: float):
             current_bonus = row['current_bonus']
             total_spent = row['total_spent']
 
-        # Рассчитываем бонусы: 10% от суммы
-        bonus_earned = int(total_amount * 0.1)
+        # Рассчитываем бонусы: 5% от суммы
+        bonus_earned = int(total_amount * 0.05)  # Изменено с 0.1 на 0.05
         new_total_spent = total_spent + total_amount
         new_current_bonus = current_bonus + bonus_earned
 
@@ -583,8 +583,8 @@ def create_order(user_id: int, name: str, phone: str, address: str,
             """, (user_id, order_id, actual_bonus_used,
                   f"Списание за заказ #{order_id}", user_id))
 
-        # Начисляем новые бонусы (10% от итоговой суммы после скидки)
-        bonus_earned = int(final_total * 0.1)
+        # Начисляем новые бонусы (5% от итоговой суммы после скидки)
+        bonus_earned = int(final_total * 0.05)  # Изменено с 0.1 на 0.05
         if bonus_earned > 0:
             cur.execute("""
                 UPDATE loyalty_program 
