@@ -1419,7 +1419,12 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
         return
 
     # Рассчитываем сумму с учетом скидок и бонусов
-    calculation = await calculate_order_total_with_bonuses(callback.from_user.id)
+    try:
+        calculation = await calculate_order_total_with_bonuses(callback.from_user.id)
+    except Exception as e:
+        logger.error(f"Ошибка в calculate_order_total_with_bonuses: {e}")
+        await callback.message.answer("❌ Произошла ошибка при расчёте суммы заказа. Попробуйте позже.")
+        return
 
     await state.update_data(
         products_total=calculation['products_total'] + calculation['discount'],  # Исходная сумма
