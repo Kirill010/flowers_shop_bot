@@ -593,8 +593,9 @@ def create_order(user_id: int, name: str, phone: str, address: str,
             """, (user_id, order_id, actual_bonus_used,
                   f"Списание за заказ #{order_id}", user_id))
 
-        # Начисляем новые бонусы (5% от итоговой суммы после скидки)
-        bonus_earned = int(final_total * 0.05)
+        products_total = sum(item['price'] * item['quantity'] for item in cart_items)
+        bonus_earned = round(products_total * 0.05)  # Начисляем новые бонусы (5% от итоговой суммы после скидки)
+
         if bonus_earned > 0:
             cur.execute("""
                 UPDATE loyalty_program 
