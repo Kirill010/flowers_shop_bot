@@ -53,6 +53,8 @@ if __name__ == "__main__":
 # nohup python bot.py > bot.log &
 # nohup python bot.py > bot.log 2>&1 &
 # nano bot_manager.sh
+# chmod +x bot_manager.sh
 # ./bot_manager.sh stop
 # ./bot_manager.sh start
+# ./bot_manager.sh restart
 # ./bot_manager.sh status
