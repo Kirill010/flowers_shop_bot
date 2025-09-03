@@ -47,6 +47,7 @@ if __name__ == "__main__":
 # python -m venv .venv
 # source .venv/bin/activate
 # pip install aiohttp_socks
+# pip install -r requirements.txt
 # ps aux | grep "python bot.py"
 # pgrep -f "python bot.py"
 # pkill -f "python bot.py"
