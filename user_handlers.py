@@ -2437,18 +2437,25 @@ async def confirm_order(callback: CallbackQuery, state: FSMContext):
     # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА - УБЕДИМСЯ ЧТО КОРЗИНА ОЧИЩЕНА
     cart_after_order = get_cart(user_id)
     if cart_after_order:
-        # Если корзина не очистилась, очищаем вручную
         clear_cart(user_id)
         print(f"⚠️ Корзина не очистилась автоматически для пользователя {user_id}, очищаем вручную")
 
-    # Получаем информацию о начисленных бонусах
+    # 🔁 Получаем ИТОГОВУЮ СУММУ ИЗ ЗАКАЗА, А НЕ ИЗ STATE
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT total FROM orders WHERE id = ?", (order_id,))
+        row = cur.fetchone()
+        final_total = row[0] if row else 0
+
+    # Получаем информацию о бонусах
     bonus_info = get_bonus_info(user_id)
 
+    # 🎉 Отправляем сообщение с правильной суммой
     await callback.message.answer(
         f"🎉 Заказ #{order_id} оформлен!\n"
         f"💎 Использовано бонусов: {bonus_used} ₽\n"
-        f"💎 Начислено бонусов: {bonus_info['current_bonus']} ₽\n"
-        f"💰 Итоговая сумма: {data.get('final_total', 0)} ₽"
+        f"💎 Начислено бонусов: {bonus_info['total_bonus_earned']} ₽\n"
+        f"💰 Итоговая сумма: {final_total} ₽"
     )
 
     await state.clear()
