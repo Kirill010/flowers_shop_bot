@@ -1986,21 +1986,32 @@ async def process_bonus_amount(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "pay_cash")
 async def process_cash_payment(callback: CallbackQuery, state: FSMContext):
-    """Обработка оплаты наличными"""
+    """Обработка оплаты наличными с учетом бонусов"""
     await state.update_data(payment_method='cash')
 
     data = await state.get_data()
-    cart_items = get_cart(callback.from_user.id)
-    products_total = sum(item['price'] * item['quantity'] for item in cart_items)
+    user_id = callback.from_user.id
+    cart_items = get_cart(user_id)
 
-    # Для самовывоза доставка бесплатна
+    # Правильный расчет с учетом бонусов
     delivery_type = data.get('delivery_type', 'delivery')
-    delivery_cost = data.get('delivery_cost', 0)
+    delivery_cost = 0 if delivery_type == "pickup" else 300
+    bonus_used = data.get('bonus_used', 0)
 
-    total = products_total + delivery_cost
+    calculation = await calculate_order_total_with_bonuses(
+        user_id,
+        delivery_cost,
+        bonus_used
+    )
 
-    # Сохраняем стоимость доставки в state
-    await state.update_data(delivery_cost=delivery_cost, payment_amount=total)
+    total = calculation['final_total']
+
+    # Сохраняем данные
+    await state.update_data(
+        delivery_cost=delivery_cost,
+        payment_amount=total,
+        bonus_used=bonus_used
+    )
 
     await show_order_summary(callback, state, total)
     await callback.answer()
@@ -2179,29 +2190,35 @@ async def show_order_summary(callback: CallbackQuery, state: FSMContext, total: 
 
 @router.callback_query(F.data == "pay_manager")
 async def process_manager_payment(callback: CallbackQuery, state: FSMContext):
-    """Обработка оплаты через менеджера"""
+    """Обработка оплаты через менеджера с учетом бонусов"""
     try:
         await state.update_data(payment_method='manager')
         data = await state.get_data()
+        user_id = callback.from_user.id
 
         # Получаем корзину
-        cart_items = get_cart(callback.from_user.id)
+        cart_items = get_cart(user_id)
         if not cart_items:
             await callback.answer("❌ Корзина пуста")
             return
 
         # ПРАВИЛЬНЫЙ РАСЧЕТ С УЧЕТОМ БОНУСОВ
-        products_total = sum(item['price'] * item['quantity'] for item in cart_items)
         delivery_type = data.get('delivery_type', 'delivery')
         delivery_cost = 0 if delivery_type == "pickup" else 300
-        bonus_used = data.get('bonus_used', 0)  # ← ПОЛУЧАЕМ ИСПОЛЬЗОВАННЫЕ БОНУСЫ
+        bonus_used = data.get('bonus_used', 0)
 
-        # Правильный расчет итоговой суммы
-        total = max(0, products_total - bonus_used + delivery_cost)
+        # Используем функцию расчета с бонусами
+        calculation = await calculate_order_total_with_bonuses(
+            user_id,
+            delivery_cost,
+            bonus_used
+        )
+
+        total = calculation['final_total']
 
         # Создаем заказ
         order_id = create_order(
-            user_id=callback.from_user.id,
+            user_id=user_id,
             name=data.get('name', ''),
             phone=data.get('phone', ''),
             address=data.get('address', ''),
@@ -2210,10 +2227,14 @@ async def process_manager_payment(callback: CallbackQuery, state: FSMContext):
             payment='manager',
             delivery_cost=delivery_cost,
             delivery_type=delivery_type,
-            bonus_used=bonus_used  # ← ПЕРЕДАЕМ ИСПОЛЬЗОВАННЫЕ БОНУСЫ
+            bonus_used=bonus_used
         )
 
-        # Отправляем уведомление менеджеру
+        if order_id == -1:
+            await callback.message.answer("❌ Ошибка при создании заказа.")
+            return
+
+        # Отправляем уведомление менеджеру с информацией о бонусах
         delivery_type_text = "Самовывоз" if delivery_type == "pickup" else "Доставка"
         admin_msg = (
             "👤 <b>НОВЫЙ ЗАКАЗ ЧЕРЕЗ МЕНЕДЖЕРА</b>\n\n"
@@ -2226,16 +2247,21 @@ async def process_manager_payment(callback: CallbackQuery, state: FSMContext):
         if delivery_type == "delivery":
             admin_msg += f"🏠 Адрес: {data.get('address', 'Не указан')}\n"
 
-        # ДОБАВЛЯЕМ ИНФОРМАЦИЮ О БОНУСАХ В УВЕДОМЛЕНИЕ
+        # Добавляем информацию о бонусах
         if bonus_used > 0:
             admin_msg += f"💎 Использовано бонусов: {bonus_used} ₽\n"
 
         admin_msg += (
             f"📅 Дата: {data.get('delivery_date', 'Не указана')}\n"
             f"⏰ Время: {data.get('delivery_time', 'Не указано')}\n"
-            f"💰 Сумма: {total} ₽\n\n"  # ← ТЕПЕРЬ ПРАВИЛЬНАЯ СУММА
-            f"🛒 Товары:\n"
+            f"💰 Сумма товаров: {calculation['products_total_after_discount']} ₽\n"
         )
+
+        if calculation['discount'] > 0:
+            admin_msg += f"🎉 Скидка на первый заказ: -{calculation['discount']} ₽\n"
+
+        admin_msg += f"💰 Итоговая сумма: {total} ₽\n\n"
+        admin_msg += f"🛒 Товары:\n"
 
         for item in cart_items:
             admin_msg += f"• {item['name']} ×{item['quantity']} - {item['price'] * item['quantity']} ₽\n"
@@ -2245,12 +2271,11 @@ async def process_manager_payment(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(
             f"✅ <b>Заказ #{order_id} оформлен!</b>\n\n"
             f"📞 Менеджер свяжется с вами для подтверждения.\n"
-            f"💰 Сумма: {total} ₽\n"
-            f"📅 {'Получение' if delivery_type == 'pickup' else 'Доставка'}: "
-            f"{data.get('delivery_date', '')} в {data.get('delivery_time', '')}",
-            parse_mode="HTML"
+            f"💰 Итоговая сумма: {total} ₽\n"
         )
 
+        # Очищаем корзину
+        clear_cart(user_id)
         await state.clear()
 
     except Exception as e:
