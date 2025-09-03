@@ -44,8 +44,8 @@ if __name__ == "__main__":
 # /pending_prices
 # deactivate
 # rm -rf venv
-# python -m venv venv
-# source venv/bin/activate
+# python -m venv .venv
+# source .venv/bin/activate
 # pip install aiohttp_socks
 # ps aux | grep "python bot.py"
 # pgrep -f "python bot.py"
