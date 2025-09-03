@@ -31,3 +31,28 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+# /add
+# /update_catalog
+# /debug
+# /mark_delivered
+# /reviews_debug
+# /start
+# /admin
+# /myid
+# /edit_price
+# /pending_prices
+# deactivate
+# rm -rf venv
+# python -m venv venv
+# source venv/bin/activate
+# pip install aiohttp_socks
+# ps aux | grep "python bot.py"
+# pgrep -f "python bot.py"
+# pkill -f "python bot.py"
+# nohup python bot.py > bot.log &
+# nohup python bot.py > bot.log 2>&1 &
+# nano bot_manager.sh
+# ./bot_manager.sh stop
+# ./bot_manager.sh start
+# ./bot_manager.sh status
