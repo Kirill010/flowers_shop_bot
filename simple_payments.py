@@ -24,7 +24,10 @@ class SimplePaymentManager:
 
         for attempt in range(self.retry_attempts):
             try:
-                payment = Payment.create({
+                # Получаем телефон из metadata
+                user_phone = metadata.get("phone") or metadata.get("user_phone", "9999999999")
+
+                payment_data = {
                     "amount": {
                         "value": str(amount),
                         "currency": "RUB"
@@ -37,11 +40,11 @@ class SimplePaymentManager:
                     "description": description,
                     "metadata": metadata,
                     "receipt": {
-                        "customer": {"phone": metadata.get("phone", "9999999999")},
+                        "customer": {"phone": user_phone},
                         "items": [
                             {
-                                "description": description,
-                                "quantity": 1,
+                                "description": description[:128],
+                                "quantity": "1.00",
                                 "amount": {
                                     "value": str(amount),
                                     "currency": "RUB"
@@ -52,11 +55,16 @@ class SimplePaymentManager:
                             }
                         ]
                     }
-                })
+                }
+
+                # Убираем receipt для очень маленьких сумм (менее 1 рубля)
+                if amount < 1:
+                    payment_data.pop("receipt", None)
+
+                payment = Payment.create(payment_data)
 
                 logger.info(f"Платеж создан: {payment.id}, статус: {payment.status}")
 
-                # Возвращаем правильную структуру
                 return {
                     "id": payment.id,
                     "status": payment.status,
@@ -69,19 +77,6 @@ class SimplePaymentManager:
                 if attempt < self.retry_attempts - 1:
                     await asyncio.sleep(self.retry_delay)
         return None
-
-    async def check_payment_status(self, payment_id: str) -> Optional[str]:
-        """Проверка статуса платежа в ЮKassa"""
-        logger.info(f"Проверка статуса платежа: {payment_id}")
-
-        try:
-            loop = asyncio.get_event_loop()
-            payment = await loop.run_in_executor(None, lambda: Payment.find_one(payment_id))
-            logger.info(f"Статус платежа {payment_id}: {payment.status}")
-            return payment.status
-        except Exception as e:
-            logger.error(f"Ошибка проверки статуса: {e}")
-            return None
 
 
 payment_manager = SimplePaymentManager()

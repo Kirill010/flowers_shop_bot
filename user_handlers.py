@@ -158,13 +158,12 @@ async def calculate_order_total_with_bonuses(user_id: int, delivery_cost: int = 
     # Проверяем первый ли это заказ
     is_first = is_first_order(user_id)
     discount = 0
-
     if is_first:
-        # Применяем 10% скидку на товары (но не на доставку)
         discount = int(original_products_total * FIRST_ORDER_DISCOUNT)
+        # Убедитесь, что скидка не превышает сумму товаров
+        discount = min(discount, original_products_total)
 
-    # Сумма товаров после скидки (но до применения бонусов)
-    products_total_after_discount = original_products_total - discount
+    products_total_after_discount = max(0, original_products_total - discount)
 
     # Получаем информацию о бонусах пользователя
     bonus_info = get_bonus_info(user_id)
@@ -1698,6 +1697,10 @@ async def process_online_payment_selection(callback: CallbackQuery, state: FSMCo
 
         total_amount = calculation['final_total']
 
+        user_phone = data.get('phone', '')
+        if not user_phone:
+            user_phone = "9999999999"
+
         # Создаем платеж в ЮKassa
         cart_items = get_cart(user_id)
 
@@ -1705,7 +1708,7 @@ async def process_online_payment_selection(callback: CallbackQuery, state: FSMCo
         metadata = {
             "user_id": user_id,
             "name": data.get('name', ''),
-            "phone": data.get('phone', ''),
+            "phone": user_phone,
             "address": data.get('address', ''),
             "delivery_date": data.get('delivery_date', ''),
             "delivery_time": data.get('delivery_time', ''),
