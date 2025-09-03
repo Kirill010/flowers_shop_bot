@@ -2631,15 +2631,14 @@ async def show_bonus_info(event: Union[CallbackQuery, Message]):
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 История начислений", callback_data="bonus_history")],
-        [InlineKeyboardButton(text="ℹ️ Подробнее о программе", callback_data="bonus_help")]
+        [InlineKeyboardButton(text="📊 История начислений", callback_data="bonus_history")]
     ])
 
     if is_callback:
-        await message.answer(text, parse_mode="HTML")
+        await message.answer(text, parse_mode="HTML", reply_markup=kb)
         await event.answer()
     else:
-        await message.answer(text, parse_mode="HTML")
+        await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.callback_query(F.data == "bonus_history")
