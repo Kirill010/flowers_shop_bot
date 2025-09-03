@@ -477,7 +477,7 @@ def add_bonus_points(user_id: int, order_id: int, total_amount: float):
             total_spent = row['total_spent']
 
         # Рассчитываем бонусы: 5% от суммы
-        bonus_earned = round(total_amount * 0.05)
+        bonus_earned = max(0, math.ceil(total_amount * 0.05))
         new_total_spent = total_spent + total_amount
         new_current_bonus = current_bonus + bonus_earned
 
@@ -532,7 +532,7 @@ def is_first_order(user_id: int) -> bool:
 def create_order(user_id: int, name: str, phone: str, address: str,
                  delivery_date: str, delivery_time: str, payment: str,
                  delivery_cost: int = 0, delivery_type: str = "delivery",
-                 bonus_used: int = 0, discount: int = 0) -> int:
+                 bonus_used: int = 0) -> int:
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -543,59 +543,59 @@ def create_order(user_id: int, name: str, phone: str, address: str,
             VALUES (?, ?)
         """, (user_id, name.split()[0] if name else 'Пользователь'))
 
-        # Получаем корзину и рассчитываем сумму
+        # Получаем корзину
         cart_items = get_cart(user_id)
         products_total = sum(item['price'] * item['quantity'] for item in cart_items)
 
+        # Проверяем, первый ли заказ
+        is_first = is_first_order(user_id)
+
         # Проверяем доступность бонусов
+        actual_bonus_used = 0
         if bonus_used > 0:
             bonus_info = get_bonus_info(user_id)
             max_bonus_allowed = int(products_total * 0.3)
             actual_bonus_used = min(bonus_used, bonus_info['current_bonus'], max_bonus_allowed)
-
             if actual_bonus_used < bonus_used:
-                return -1  # Код ошибки - нельзя использовать столько бонусов
-        else:
-            actual_bonus_used = 0
+                return -1  # Ошибка
+
+        # Рассчитываем скидку на первый заказ
+        discount_applied = 0
+        if is_first:
+            discount_applied = int(products_total * 0.1)  # 10% от стоимости товаров
 
         # Рассчитываем итоговую сумму
-        final_total = max(0, products_total + delivery_cost - actual_bonus_used)
+        subtotal = products_total + delivery_cost - actual_bonus_used
+        final_total = max(0, subtotal - discount_applied)  # ← ВАЖНО: вычитаем скидку
 
-        # Создаем заказ
+        # Создаём заказ
         cur.execute("""
             INSERT INTO orders 
             (user_id, items, total, customer_name, phone, address, 
-            delivery_date, delivery_time, payment_method, delivery_cost, 
-            delivery_type, status, bonus_used, discount_applied)
+             delivery_date, delivery_time, payment_method, delivery_cost, 
+             delivery_type, status, bonus_used, discount_applied)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, json.dumps(cart_items), final_total, name, phone, address,
               delivery_date, delivery_time, payment, delivery_cost,
-              delivery_type, 'new', actual_bonus_used, discount))  # Добавляем discount
+              delivery_type, 'new', actual_bonus_used, discount_applied))
+
         order_id = cur.lastrowid
 
-        # Списываем бонусы, если они использовались
+        # Списываем бонусы, если использовались
         if actual_bonus_used > 0:
-            # Обновляем баланс бонусов
             cur.execute("""
                 UPDATE loyalty_program 
-                SET current_bonus = current_bonus - ?,
-                    updated_at = CURRENT_TIMESTAMP
+                SET current_bonus = current_bonus - ? 
                 WHERE user_id = ?
             """, (actual_bonus_used, user_id))
-
-            # Записываем в историю списание
             cur.execute("""
                 INSERT INTO loyalty_history 
                 (user_id, order_id, points_change, reason, remaining_points)
-                SELECT ?, ?, -?, ?, current_bonus 
-                FROM loyalty_program 
-                WHERE user_id = ?
-            """, (user_id, order_id, actual_bonus_used,
-                  f"Списание за заказ #{order_id}", user_id))
+                SELECT ?, ?, -?, ?, current_bonus FROM loyalty_program WHERE user_id = ?
+            """, (user_id, order_id, actual_bonus_used, f"Списание за заказ #{order_id}", user_id))
 
-        products_total = sum(item['price'] * item['quantity'] for item in cart_items)
-        bonus_earned = round(products_total * 0.05)  # Начисляем новые бонусы (5% от итоговой суммы после скидки)
-
+        # Начисляем бонусы: 5% от итоговой суммы (после всех скидок)
+        bonus_earned = max(0, math.ceil(final_total * 0.05))
         if bonus_earned > 0:
             cur.execute("""
                 UPDATE loyalty_program 
@@ -605,24 +605,19 @@ def create_order(user_id: int, name: str, phone: str, address: str,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ?
             """, (bonus_earned, bonus_earned, final_total, user_id))
-
-            # Записываем в историю начисление
             cur.execute("""
                 INSERT INTO loyalty_history 
                 (user_id, order_id, points_change, reason, remaining_points)
-                SELECT ?, ?, ?, ?, current_bonus 
-                FROM loyalty_program 
-                WHERE user_id = ?
-            """, (user_id, order_id, bonus_earned,
-                  f"Начисление за заказ #{order_id}", user_id))
+                SELECT ?, ?, ?, ?, current_bonus FROM loyalty_program WHERE user_id = ?
+            """, (user_id, order_id, bonus_earned, f"Начисление за заказ #{order_id}", user_id))
 
-        cur.execute("DELETE FROM cart WHERE user_id=?", (user_id,))
+        # Очищаем корзину
+        cur.execute("DELETE FROM cart WHERE user_id = ?", (user_id,))
         conn.commit()
         return order_id
-        # Очищаем корзину
-        # clear_cart(user_id)
 
-    except:
+    except Exception as e:
+        print(f"Ошибка при создании заказа: {e}")
         conn.rollback()
         return -1
 
