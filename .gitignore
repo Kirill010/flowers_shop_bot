@@ -5,3 +5,6 @@ images
 *.db
 *.pdf
 __pycache__/
+.env
+*.env
+config.py

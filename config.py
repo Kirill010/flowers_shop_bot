@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Токен бота
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8201157651:AAHIA7J5_NuRHhBmEEgB1H0vuXK4DnqBucI")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8217430680:AAGmi2nTYJvj9SNIE0PAHlEu00CFBSreU5s")
 
 # ID администратора
 ADMIN_ID = int(os.getenv("ADMIN_ID", "1095668090"))
@@ -18,7 +18,7 @@ ADMINS = [ADMIN_ID, ADMIN_ID1, ADMIN_ID2]
 
 # ЮKassa
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "1037498")
-YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "live_jxIub1SHUSUh5F2hw_CjY2kK4a2Rc57yqHx5uSySQ34")
+YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "live_2qJLtEw_WUaPnuMTj0KeoZA9HR7e03GpDHVR2_TF5G8")
 
 YOOKASSA_TAX_RATE = os.getenv("YOOKASSA_TAX_RATE", "1")
 YOOKASSA_TAX_SYSTEM = os.getenv("YOOKASSA_TAX_SYSTEM", "1")
