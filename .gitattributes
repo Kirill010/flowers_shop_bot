@@ -1,0 +1,6 @@
+# Единые переводы строк при переносе через git.
+# start.bat обязан быть в формате Windows (CRLF), иначе cmd.exe путает метки и запуск ломается.
+* text=auto
+*.bat text eol=crlf
+*.ttf binary
+*.png binary

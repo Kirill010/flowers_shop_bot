@@ -1,10 +1,23 @@
-.venv/**
-venv/**
-images
-.idea
-*.db
-*.pdf
-__pycache__/
+# Секреты и личные данные — НИКОГДА не попадают в git
 .env
+.env.*
+!.env.example
 *.env
-config.py
+
+# База с клиентами и заказами, журналы, загруженные фото
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Программы и временные файлы
+.venv/
+venv/
+.tmp/
+__pycache__/
+*.pyc
+.pytest_cache/
+.idea/
+.vscode/
