@@ -40,6 +40,21 @@ def duration(minutes: int) -> str:
     return f"{minutes} {plural(minutes, 'минуту', 'минуты', 'минут')}"
 
 
+def clock(t) -> str:
+    """time(8, 0) → '8:00' — как люди пишут время открытия."""
+    return f"{t.hour}:{t.minute:02d}"
+
+
+def waiting(minutes: int) -> str:
+    """Сколько уже ждёт заказ или обращение: 12 → «12 мин», 75 → «1 ч 15 мин», 600 → «10 ч», 3000 → «более суток»."""
+    if minutes < 60:
+        return f"{max(minutes, 1)} мин"
+    if minutes >= 24 * 60:
+        return "более суток"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} ч" + (f" {rest} мин" if rest else "")
+
+
 def slot_text(slot: str) -> str:
     """'Как можно скорее' → 'как можно скорее' (после слов «Сегодня,»); окна времени — как есть."""
     return slot[:1].lower() + slot[1:] if slot.startswith("Как можно") else slot
@@ -47,12 +62,15 @@ def slot_text(slot: str) -> str:
 
 # ───────────────────────── общие ─────────────────────────
 
-def greeting(shop: Shop) -> str:
+def greeting(shop: Shop, closed: bool = False) -> str:
     where = esc(shop.address) + (f" ({esc(shop.landmark)})" if shop.landmark else "")
-    return (f"Здравствуйте! 🌸 Это <b>{esc(shop.name)}</b>.\n\n"
+    text = (f"Здравствуйте! 🌸 Это <b>{esc(shop.name)}</b>.\n\n"
             "Выберите букет, оформите доставку или самовывоз — всё здесь, за пару минут. "
             "Есть вопрос — просто напишите его сюда, передам менеджеру.\n\n"
             f"📍 {where}\n🕒 {esc(shop.hours)}")
+    if closed:  # ночью не создаём ощущения, что бот завис: честно говорим, когда ответят
+        text += f"\n\n🌙 Сейчас магазин закрыт. Заказ можно оформить — подтвердим с {clock(shop.open)}."
+    return text
 
 
 def help_text(shop: Shop, is_admin: bool) -> str:
@@ -197,11 +215,13 @@ def map_text(shop: Shop) -> str:
     return "\n".join(out)
 
 
-def manager_text(shop: Shop) -> str:
-    return ("💬 <b>Менеджер</b>\n\n"
-            "Напишите свой вопрос — менеджер ответит в ближайшее время "
-            f"(в рабочее время — в течение {duration(shop.response_minutes)}).\n"
-            "Или нажмите кнопку, чтобы перейти в чат.\n\n"
+def manager_text(shop: Shop, closed: bool = False) -> str:
+    if closed:
+        first = f"Сейчас магазин закрыт — ответим с {clock(shop.open)}. Вопрос можно написать уже сейчас.\n"
+    else:
+        first = ("Напишите свой вопрос — менеджер ответит в ближайшее время "
+                 f"(в рабочее время — в течение {duration(shop.response_minutes)}).\n")
+    return ("💬 <b>Менеджер</b>\n\n" + first + "Или нажмите кнопку, чтобы перейти в чат.\n\n"
             f"🕒 {esc(shop.hours)} · 📞 {esc(shop.phone)}")
 
 
@@ -287,7 +307,7 @@ def checkout_summary(shop: Shop, data: dict, quote: Quote, day: date, today: dat
     return "\n".join(out)
 
 
-def order_created(order: Order, shop: Shop, online_failed: bool = False) -> str:
+def order_created(order: Order, shop: Shop, online_failed: bool = False, closed: bool = False) -> str:
     out = [f"✅ <b>Заказ №{order.id} принят</b>", "",
            f"🗓 {long_date(order.date)}, {esc(slot_text(order.slot))}",
            f"🚚 Доставка: {esc(order.address)}" if order.is_delivery else f"🛍 Самовывоз: {esc(shop.address)}",
@@ -306,8 +326,9 @@ def order_created(order: Order, shop: Shop, online_failed: bool = False) -> str:
             out += ["", "Менеджер пришлёт реквизиты или ссылку на оплату — букет на дату собираем после оплаты."]
     else:
         out[-1] += " · оплата при получении"
-    out += ["", f"Подтвердим в течение {duration(shop.response_minutes)} (в рабочее время). "
-                f"Статус — в разделе «{BTN_ORDERS}»."]
+    promise = (f"Магазин сейчас закрыт — подтвердим заказ с {clock(shop.open)}." if closed
+               else f"Подтвердим в течение {duration(shop.response_minutes)} (в рабочее время).")
+    out += ["", f"{promise} Статус — в разделе «{BTN_ORDERS}»."]
     return "\n".join(out)
 
 

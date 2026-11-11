@@ -6,6 +6,7 @@ import logging
 import logging.handlers
 import sys
 import time
+from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -16,14 +17,31 @@ from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramU
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, ErrorEvent
 
-from . import __version__, billing, catalog, handlers, notify
+from . import __version__, backup, billing, catalog, handlers, notify, reminders
 from .config import ConfigError, Settings, load_settings, load_shop
 from .ctx import Ctx
 from .db import Database
 from .middlewares import MenuInterrupt, Throttle, UserMiddleware
+from .util import db_time, parse_db_time, utcnow
 from .yookassa import YooKassaClient
 
 log = logging.getLogger("flowerbot")
+
+EXIT_SETTINGS = 2  # неверные настройки: start.bat покажет, что исправить, и остановится
+EXIT_NO_CONNECTION = 3  # нет связи с Telegram: start.bat подождёт и попробует снова (например, сразу после включения компьютера)
+QUIET_RESTART = timedelta(minutes=10)
+
+
+class ConnectionProblem(ConfigError):
+    """Нет связи с Telegram. Это не ошибка настроек, поэтому start.bat не останавливается, а пробует снова."""
+
+
+def should_announce_start(db: Database, now: datetime) -> bool:
+    """Сообщение «бот запущен» шлём сотрудникам не чаще раза в 10 минут: если бот из-за сбоя перезапускается
+    снова и снова, сотрудников не засыпает одинаковыми сообщениями."""
+    last = db.get_meta("last_start")
+    db.set_meta("last_start", db_time(now))
+    return not last or now - parse_db_time(last) >= QUIET_RESTART
 
 COMMANDS = [BotCommand(command="menu", description="Главное меню"), BotCommand(command="cart", description="Корзина"),
             BotCommand(command="orders", description="Мои заказы"), BotCommand(command="help", description="Помощь")]
@@ -124,7 +142,7 @@ async def run(settings: Settings) -> None:
     ctx = Ctx(settings, db, shop, yookassa)
     bot = Bot(settings.bot_token, session=make_session(settings),
               default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))
-    payments_task: asyncio.Task | None = None
+    background: list[asyncio.Task] = []
     try:
         try:
             me = await bot.get_me()
@@ -133,7 +151,7 @@ async def run(settings: Settings) -> None:
                 "Telegram не принял BOT_TOKEN из файла .env: ключ неверный или его отозвали.\n"
                 "Откройте @BotFather → /mybots → ваш бот → API Token, скопируйте ключ заново и вставьте в .env.") from None
         except (TelegramNetworkError, asyncio.TimeoutError, OSError):
-            raise ConfigError(
+            raise ConnectionProblem(
                 "Не получается подключиться к Telegram. Проверьте интернет.\n"
                 "Если Telegram у вас открывается только через VPN или прокси — впишите адрес прокси в .env "
                 "в строку PROXY_URL (например socks5://127.0.0.1:1080).") from None
@@ -151,15 +169,17 @@ async def run(settings: Settings) -> None:
         if not ctx.staff_ready:
             log.warning("Режим настройки: ADMIN_IDS пуст, поэтому заказы не принимаются. Напишите боту /myid, "
                         "впишите номер в .env (ADMIN_IDS=...) и перезапустите бота.")
-        else:
+        elif should_announce_start(db, utcnow()):
             await notify.to_staff(bot, ctx, f"✅ Бот запущен (версия {__version__}). Панель — кнопка «👑 Панель» внизу "
                                             "(если её нет, напишите боту /start).")
 
-        payments_task = asyncio.create_task(billing.payments_loop(ctx, bot))
+        background = [asyncio.create_task(billing.payments_loop(ctx, bot)),  # оплаты ЮKassa
+                      asyncio.create_task(reminders.reminders_loop(ctx, bot)),  # «заказ ждёт подтверждения»
+                      asyncio.create_task(backup.backup_loop(ctx))]  # копия базы раз в сутки
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
-        if payments_task:
-            payments_task.cancel()
+        for task in background:
+            task.cancel()
         if yookassa:
             await yookassa.close()
         await bot.session.close()
@@ -171,13 +191,16 @@ def main() -> int:
         settings = load_settings()
     except ConfigError as exc:
         print(f"\n❌ {exc}\n")
-        return 2
+        return EXIT_SETTINGS
     setup_logging(settings)
     try:
         asyncio.run(run(settings))
+    except ConnectionProblem as exc:
+        print(f"\n⚠️ {exc}\n")
+        return EXIT_NO_CONNECTION
     except ConfigError as exc:
         print(f"\n❌ {exc}\n")
-        return 2
+        return EXIT_SETTINGS
     except KeyboardInterrupt:
         print("\nБот остановлен.")
     return 0

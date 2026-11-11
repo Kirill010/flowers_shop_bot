@@ -150,11 +150,12 @@ class Harness:
             "message_id": next(self._message_ids), "date": int(self.now.timestamp()), "chat": {"id": uid, "type": "private"},
             "from": self.user(uid), "contact": card})
 
-    async def photo(self, uid: int, caption: str | None = None, *, media_group_id: str | None = None):
+    async def photo(self, uid: int, caption: str | None = None, *, media_group_id: str | None = None,
+                    file_id: str = "PHOTO1"):
         """Человек прислал фото (с подписью или без; media_group_id — если это часть альбома)."""
         message = {"message_id": next(self._message_ids), "date": int(self.now.timestamp()),
                    "chat": {"id": uid, "type": "private"}, "from": self.user(uid),
-                   "photo": [{"file_id": "PHOTO1", "file_unique_id": "u1", "width": 100, "height": 100}]}
+                   "photo": [{"file_id": file_id, "file_unique_id": "u1", "width": 100, "height": 100}]}
         if caption is not None:
             message["caption"] = caption
         if media_group_id:

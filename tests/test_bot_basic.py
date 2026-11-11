@@ -154,9 +154,18 @@ class MediaToManagerTests(BotCase):
         calls = await h.press(CUSTOMER, "✅ Отправить менеджеру")
         self.assertEqual([c.chat_id for c in calls if isinstance(c, CopyMessage)], [-1001234567890])
 
-    async def test_staff_photo_gets_a_hint_instead_of_a_question(self):
+    async def test_staff_photo_gets_a_product_picker_instead_of_a_question(self):
         calls = await self.h.photo(ADMIN, "просто так")
-        self.assertIn("Фото товаров", self.h.last_text(calls))
+        self.assertIn("Для какого товара", self.h.last_text(calls))
+        self.assertFalse(self.h.has_button("✅ Отправить менеджеру", calls))
+        self.assertEqual(len(self.h.find("ad:put:", calls)), 20)
+
+    async def test_staff_file_or_voice_gets_a_hint_not_a_question(self):
+        calls = await self.h.other(ADMIN, document={"file_id": "D", "file_unique_id": "d", "file_name": "classic.jpg",
+                                                    "mime_type": "image/jpeg"})
+        self.assertIn("не файлом", self.h.last_text(calls))
+        calls = await self.h.other(ADMIN, voice={"file_id": "V", "file_unique_id": "v", "duration": 2})
+        self.assertIn("Я понимаю текст", self.h.last_text(calls))
         self.assertFalse(self.h.has_button("✅ Отправить менеджеру", calls))
 
     async def test_stickers_and_other_content_get_a_hint_not_silence(self):

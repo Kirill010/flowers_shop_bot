@@ -18,7 +18,7 @@ router = Router(name="menu")
 @router.message(Command("menu"))
 async def start(message: Message, state: FSMContext, ctx: Ctx) -> None:
     await state.clear()
-    text = texts.greeting(ctx.shop)
+    text = texts.greeting(ctx.shop, closed=not ctx.is_open)
     if not ctx.staff_ready:
         text += f"\n\n⚙️ Бот ещё настраивается: заказы в нём пока не принимаются. Позвоните нам: {ctx.shop.phone}"
     await message.answer(text, reply_markup=menu_for(ctx, message.from_user.id))

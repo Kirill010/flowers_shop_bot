@@ -766,7 +766,8 @@ class AdminTests(FlowCase):
                   Adm_(act="cancel_ask", id=1), Adm_(act="back", id=1), Adm_(act="list", arg="new"),
                   Adm_(act="leads"), Adm_(act="lead", id=1), Adm_(act="lead_done", id=1), Adm_(act="issue", id=1),
                   Adm_(act="panel"), Adm_(act="more"), Adm_(act="stock"), Adm_(act="stats", arg="7"),
-                  Adm_(act="photo_help"), Adm_(act="photo", arg="classic"), Adm_(act="find"), Adm_(act="reviews")]
+                  Adm_(act="photo_help"), Adm_(act="photo", arg="classic"), Adm_(act="find"), Adm_(act="reviews"),
+                  Adm_(act="put", id=1, arg="classic"), Adm_(act="drop", id=1)]
         for data in forged:
             calls = await self.h.tap(OTHER, data)
             self.assertIn("устарела", self.h.alert(calls).text, data)
@@ -893,6 +894,49 @@ class AdminTests(FlowCase):
         self.assertTrue(path.is_file())
         self.assertEqual(catalog.get_product(self.h.db, "classic").photo, "classic.jpg")
         self.assertTrue(self.h.has_button("🖼 Классика", calls), "в списке — отметка «фото уже есть»")
+
+    async def test_photo_first_then_choose_the_product(self):
+        """Самый естественный путь: сфотографировал, отправил боту, нажал на товар."""
+        calls = await self.h.photo(ADMIN)  # ни команды, ни подписи, ни заранее выбранного товара
+        self.assertIn("Для какого товара", self.h.last_text(calls))
+        self.assertEqual(len(self.h.find("ad:put:", calls)), 20)
+        calls = await self.h.press(ADMIN, "📷 Классика")
+        self.assertIn("Фото для «Классика» сохранено", self.h.last_text(calls))
+        self.assertTrue((Path(self.h.ctx.settings.photos_dir) / "classic.jpg").is_file())
+        self.assertEqual(catalog.get_product(self.h.db, "classic").photo, "classic.jpg")
+        calls = await self.h.press(ADMIN, "📷 Классика")  # то же нажатие второй раз
+        self.assertIn("уже сохранено или устарело", self.h.alert(calls).text)
+
+    async def test_caption_with_the_product_name_saves_at_once(self):
+        for caption in ("Классика", "classic", "  КЛАССИКА  "):
+            calls = await self.h.photo(ADMIN, caption)
+            self.assertIn("сохранено", self.h.last_text(calls), caption)
+            self.assertEqual(self.h.find("ad:put:", calls), [], "когда ясно, чьё фото, не спрашиваем")
+        self.assertEqual(catalog.get_product(self.h.db, "classic").photo, "classic.jpg")
+        calls = await self.h.photo(ADMIN, "вот такой")  # подпись не про товар — спрашиваем
+        self.assertIn("Для какого товара", self.h.last_text(calls))
+
+    async def test_two_photos_two_lists_each_photo_goes_where_it_was_chosen(self):
+        from aiogram.methods import GetFile
+        first = await self.h.photo(ADMIN, file_id="AAA")
+        second = await self.h.photo(ADMIN, file_id="BBB")
+        mini = next(b.callback_data for b in self.h.buttons(first) if b.text == "📷 Мини")
+        classic = next(b.callback_data for b in self.h.buttons(second) if b.text == "📷 Классика")
+        await self.h.tap(ADMIN, classic)  # сначала выбираем для второго фото, потом для первого
+        await self.h.tap(ADMIN, mini)
+        self.assertEqual([c.file_id for c in self.h.session.calls if isinstance(c, GetFile)], ["BBB", "AAA"])
+        folder = Path(self.h.ctx.settings.photos_dir)
+        self.assertTrue((folder / "classic.jpg").is_file() and (folder / "mini.jpg").is_file())
+
+    async def test_declined_photo_is_not_saved_and_its_list_goes_stale(self):
+        first = await self.h.photo(ADMIN, file_id="AAA")
+        drop = next(b.callback_data for b in self.h.buttons(first) if b.text == "❌ Не сохранять")
+        mini = next(b.callback_data for b in self.h.buttons(first) if b.text == "📷 Мини")
+        calls = await self.h.tap(ADMIN, drop)
+        self.assertEqual(self.h.count(DeleteMessage, calls), 1)
+        calls = await self.h.tap(ADMIN, mini)
+        self.assertIn("уже сохранено или устарело", self.h.alert(calls).text)
+        self.assertFalse((Path(self.h.ctx.settings.photos_dir) / "mini.jpg").exists())
 
     async def test_photo_by_command_and_strangers_cannot_upload(self):
         calls = await self.h.photo(ADMIN, "/photo classic")

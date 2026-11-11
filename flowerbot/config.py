@@ -91,6 +91,7 @@ class Shop:
     cert_max: int
     cert_valid_days: int
     promos: tuple[Promo, ...]
+    privacy_url: str = ""  # страница политики конфиденциальности; если указана, бот напоминает про согласие при запросе телефона
 
     @property
     def hours(self) -> str:
@@ -256,7 +257,11 @@ def parse_shop(data: Mapping) -> Shop:
         cert_max=_int(c, "max", 30000, "[certificates]", 1),
         cert_valid_days=_int(c, "valid_days", 365, "[certificates]", 1),
         promos=tuple(promos),
+        privacy_url=_str(s, "privacy_url"),
     )
+    if shop.privacy_url and not re.fullmatch(r"https?://\S+", shop.privacy_url):
+        raise ConfigError("В shop.toml privacy_url должен начинаться с https:// (ссылка на политику конфиденциальности) "
+                          "или быть пустым.")
     if shop.cert_min > shop.cert_max:
         raise ConfigError("В shop.toml в [certificates] min больше max.")
     if shop.open >= shop.close:

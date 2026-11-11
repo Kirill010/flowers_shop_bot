@@ -11,6 +11,7 @@
 (orders.quote_for), поэтому подменить сумму через кнопку нельзя."""
 from __future__ import annotations
 
+import html
 import logging
 import re
 from datetime import date
@@ -66,7 +67,7 @@ async def begin(message: Message, user: User, state: FSMContext, ctx: Ctx) -> No
         await message.answer(f"Оформляем на <b>{esc(profile['name'])}</b>, {esc(format_phone(profile['phone']))}?",
                              reply_markup=kb.co_saved())
     else:
-        await ask_contact(message, state, user, first=True)
+        await ask_contact(message, state, user, ctx, first=True)
 
 
 async def _alive(call: CallbackQuery, state: FSMContext) -> dict | None:
@@ -103,14 +104,18 @@ async def go(message: Message, user_id: int, state: FSMContext, ctx: Ctx, step: 
 
 # ───────────────────────── имя и телефон ─────────────────────────
 
-async def ask_contact(message: Message, state: FSMContext, user: User, first: bool = False) -> None:
+async def ask_contact(message: Message, state: FSMContext, user: User, ctx: Ctx, first: bool = False) -> None:
     """Самый короткий путь: одна кнопка «Поделиться номером» даёт и телефон, и имя из Telegram.
     Кто не хочет делиться — «Ввести вручную»: тогда спросим имя и номер по отдельности."""
     await state.update_data(name="", phone="")
     await state.set_state(Checkout.phone)
+    consent = ""
+    if ctx.shop.privacy_url:  # ссылка на политику задаётся в shop.toml; нет ссылки — нет и напоминания
+        url = html.escape(ctx.shop.privacy_url, quote=True)
+        consent = f'\n\n<i>Нажимая кнопку, вы соглашаетесь на <a href="{url}">обработку персональных данных</a>.</i>'
     hint = "\n\n<i>Передумали? Нажмите любую кнопку меню.</i>" if first else ""
-    await message.answer("📞 Нажмите «Поделиться номером» внизу — этого достаточно, имя возьмём из Telegram." + hint,
-                         reply_markup=kb.contact_request(manual=True))
+    await message.answer("📞 Нажмите «Поделиться номером» внизу — этого достаточно, имя возьмём из Telegram."
+                         + consent + hint, reply_markup=kb.contact_request(manual=True))
 
 
 async def ask_name(message: Message, state: FSMContext, user: User) -> None:
@@ -152,14 +157,14 @@ async def use_saved(call: CallbackQuery, state: FSMContext, ctx: Ctx) -> None:
     await call.answer()
     await _strip(call)
     if not profile or not profile["name"] or not profile["phone"]:
-        await ask_contact(message, state, call.from_user, first=True)
+        await ask_contact(message, state, call.from_user, ctx, first=True)
         return
     await state.update_data(name=profile["name"], phone=profile["phone"])
     await go(message, call.from_user.id, state, ctx, "method")
 
 
 @router.callback_query(Co.filter(F.act == "edit_contact"))
-async def edit_contact(call: CallbackQuery, state: FSMContext) -> None:
+async def edit_contact(call: CallbackQuery, state: FSMContext, ctx: Ctx) -> None:
     data = await _alive(call, state)
     if data is None or (message := msg_of(call)) is None:
         return
@@ -167,7 +172,7 @@ async def edit_contact(call: CallbackQuery, state: FSMContext) -> None:
     await _strip(call)
     if data.get("slot"):  # нажали на экране проверки заказа — после телефона вернёмся туда же
         await state.update_data(_back="summary")
-    await ask_contact(message, state, call.from_user)
+    await ask_contact(message, state, call.from_user, ctx)
 
 
 @router.callback_query(Co.filter(F.act == "name_tg"))
@@ -735,7 +740,7 @@ async def pay(call: CallbackQuery, callback_data: Co, state: FSMContext, ctx: Ct
         except (YooKassaError, ValueError) as exc:
             online_failed = True
             log.error("Не удалось создать платёж для заказа %s: %s", order_id, exc)
-    await message.answer(texts.order_created(order, ctx.shop, online_failed), reply_markup=markup)
+    await message.answer(texts.order_created(order, ctx.shop, online_failed, closed=not ctx.is_open), reply_markup=markup)
 
     staff_text = "🆕 <b>Новый заказ</b>\n" + texts.order_card(order, ctx.shop, staff=True, username=user.username or "")
     if online_failed:

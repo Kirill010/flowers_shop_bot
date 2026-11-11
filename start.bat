@@ -59,11 +59,30 @@ if not exist ".env" (
 echo [3/3] Запускаю бота. Окно не закрывайте, пока бот должен работать.
 echo       Остановить бота: закройте это окно или нажмите Ctrl + C.
 echo.
+set "WAIT=15"
+
+:run
 "%VPY%" -m flowerbot
 set "CODE=%errorlevel%"
 if "%CODE%"=="0" goto :eof
 if "%CODE%"=="2" goto settings
-goto err
+if "%CODE%"=="3" goto no_connection
+
+rem Любая другая остановка - сбой. Запускаем заново. Пауза растёт: 15, 30, 60 и так до 300 секунд,
+rem чтобы упрямая ошибка не превратилась в бесконечные частые перезапуски.
+echo.
+echo  Бот остановился из-за ошибки - её текст выше. Запускаю заново через %WAIT% сек.
+echo  Остановить: закройте это окно.
+set /a PINGS=WAIT+1
+ping -n %PINGS% 127.0.0.1 >nul
+set /a WAIT=WAIT*2
+if %WAIT% gtr 300 set "WAIT=300"
+goto run
+
+:no_connection
+echo  Нет связи с Telegram. Пробую снова через 15 секунд. Остановить: закройте это окно.
+ping -n 16 127.0.0.1 >nul
+goto run
 
 :settings
 echo  Исправьте то, что написано выше (файлы .env, shop.toml или catalog.toml),

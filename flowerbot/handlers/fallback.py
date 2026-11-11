@@ -37,9 +37,12 @@ async def unknown_text(message: Message, state: FSMContext, ctx: Ctx) -> None:
 @router.message(F.photo | F.document | F.video | F.voice | F.audio | F.video_note)
 async def unknown_media(message: Message, state: FSMContext, ctx: Ctx) -> None:
     """Клиент прислал фото букета «хочу такой» или голосовое. Это тоже вопрос менеджеру — спрашиваем одним нажатием.
-    Сотруднику, который прислал фото просто так, подсказываем, как добавить фото товара."""
+    Сотрудник, приславший обычное фото, сюда не попадает: ему бот предлагает выбрать товар (см. admin.py). Здесь он
+    оказывается, только если прислал файл или голосовое."""
     if ctx.is_admin(message.from_user.id):
-        await message.answer("📷 Чтобы добавить фото товара: «👑 Панель» → «⚙️ Ещё» → «📷 Фото товаров».",
+        is_image_file = bool(message.document and (message.document.mime_type or "").startswith("image/"))
+        await message.answer("📷 Фото товара присылайте обычным фото, не файлом — я спрошу, для какого оно товара."
+                             if is_image_file else "Я понимаю текст, фото и кнопки меню 🙂",
                              reply_markup=menu_for(ctx, message.from_user.id))
         return
     data = await state.get_data()

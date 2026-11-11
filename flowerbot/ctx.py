@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from . import catalog, schedule
@@ -20,6 +20,12 @@ class Ctx:
     shop: Shop
     yookassa: YooKassaClient | None = None
     bot_username: str = ""
+    nudged: dict = field(default_factory=dict)  # какие напоминания сотрудникам уже отправлены: {("order", 5): 1}
+
+    @property
+    def is_open(self) -> bool:
+        """Работает ли магазин прямо сейчас (по часам из shop.toml). Нужно, чтобы не обещать ответ «через 15 минут» ночью."""
+        return schedule.is_open(self.shop, self.local_now())
 
     def now(self) -> datetime:
         """Текущее время (UTC). Единый источник времени: в тестах его подменяют."""

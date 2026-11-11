@@ -397,6 +397,14 @@ def photo_pick(products: list[Product]) -> InlineKeyboardMarkup:
     return kb(*rows)
 
 
+def photo_target(products: list[Product], message_id: int) -> InlineKeyboardMarkup:
+    """Фото уже прислано — выбираем, чьё оно. message_id связывает кнопки с этим фото: если прислали несколько
+    фото подряд, у каждого свой список, и перепутать нельзя."""
+    rows = [[btn(("🖼 " if p.photo else "📷 ") + p.name, Adm(act="put", id=message_id, arg=p.sku))] for p in products]
+    rows.append([btn("❌ Не сохранять", Adm(act="drop", id=message_id))])
+    return kb(*rows)
+
+
 def stats_periods() -> InlineKeyboardMarkup:
     return kb([btn("Сегодня", Adm(act="stats", arg="1")), btn("7 дней", Adm(act="stats", arg="7")),
                btn("30 дней", Adm(act="stats", arg="30"))], [btn("⬅️ В панель", Adm(act="panel"))])

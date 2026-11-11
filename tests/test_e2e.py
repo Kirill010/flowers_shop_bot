@@ -263,6 +263,7 @@ class StartupTests(NetworkCase):
         keyboard = json.loads(greeting["reply_markup"])["keyboard"]
         self.assertEqual([len(row) for row in keyboard], [2, 2, 2, 2], "главное меню: 8 кнопок в 4 ряда")
         self.assertIn("Бот запущен", self.tg.sent_to(ADMIN)[0]["text"], "сотрудники узнают, что бот включился")
+        self.assertEqual(len(list((self.root / "data" / "backups").glob("shop-*.db"))), 1, "при запуске сделана копия базы")
 
     async def test_own_description_set_in_botfather_is_not_overwritten(self):
         self.tg.descriptions["description"] = "Описание, которое владелец написал сам"
@@ -320,12 +321,14 @@ class StartupTests(NetworkCase):
         with self.assertRaises(ConfigError) as ctx:
             await app.run(settings)
         self.assertIn("не принял BOT_TOKEN", str(ctx.exception))
+        self.assertNotIsInstance(ctx.exception, app.ConnectionProblem, "неверный ключ — это настройки, повторять бесполезно")
 
     async def test_unreachable_telegram_gives_human_error(self):
         settings = make_settings(self.root, TELEGRAM_API_URL="http://127.0.0.1:9")
         with self.assertRaises(ConfigError) as ctx:
             await app.run(settings)
         self.assertIn("PROXY_URL", str(ctx.exception))
+        self.assertIsInstance(ctx.exception, app.ConnectionProblem, "по этому start.bat поймёт: подождать и попробовать снова")
 
 
 class RealClientTests(NetworkCase):

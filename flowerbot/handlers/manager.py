@@ -33,6 +33,8 @@ PROMPTS = {
 
 
 def lead_ok(ctx: Ctx) -> str:
+    if not ctx.is_open:
+        return f"✅ Передали менеджеру. Сейчас магазин закрыт — ответим здесь, в Telegram, с {texts.clock(ctx.shop.open)}."
     return (f"✅ Передали менеджеру. Ответим здесь, в Telegram, — в рабочее время обычно в течение "
             f"{texts.duration(ctx.shop.response_minutes)}.\nСрочно? Позвоните: {esc(ctx.shop.phone)}")
 
@@ -84,14 +86,14 @@ async def cart_availability(message: Message, user: User, ctx: Ctx, bot: Bot) ->
 
 @router.message(F.text == texts.BTN_MANAGER)
 async def open_manager(message: Message, ctx: Ctx) -> None:
-    await message.answer(texts.manager_text(ctx.shop), reply_markup=kb.manager(ctx.shop))
+    await message.answer(texts.manager_text(ctx.shop, closed=not ctx.is_open), reply_markup=kb.manager(ctx.shop))
 
 
 @router.callback_query(Mg.filter(F.act == "menu"))
 async def manager_menu(call: CallbackQuery, ctx: Ctx) -> None:
     await call.answer()
     if message := msg_of(call):
-        await message.answer(texts.manager_text(ctx.shop), reply_markup=kb.manager(ctx.shop))
+        await message.answer(texts.manager_text(ctx.shop, closed=not ctx.is_open), reply_markup=kb.manager(ctx.shop))
 
 
 @router.callback_query(Mg.filter(F.act.in_({"ask", "avail", "urgent"})))
@@ -207,9 +209,10 @@ async def _phone_done(message: Message, state: FSMContext, ctx: Ctx, bot: Bot, r
     crm.save_contact(ctx.db, message.from_user.id, phone=phone)
     await state.clear()
     lead_id = await create_lead(bot, ctx, message.from_user, "callback", "Просит перезвонить.", phone=phone)
-    await message.answer(
-        (f"✅ Спасибо! Перезвоним в рабочее время — обычно в течение {texts.duration(ctx.shop.response_minutes)}."
-         if lead_id else lead_limit(ctx)), reply_markup=menu_for(ctx, message.from_user.id))
+    when = (f"с {texts.clock(ctx.shop.open)}" if not ctx.is_open
+            else f"в рабочее время — обычно в течение {texts.duration(ctx.shop.response_minutes)}")
+    await message.answer((f"✅ Спасибо! Перезвоним {when}." if lead_id else lead_limit(ctx)),
+                         reply_markup=menu_for(ctx, message.from_user.id))
 
 
 # ───────────────────────── подбор под бюджет ─────────────────────────
