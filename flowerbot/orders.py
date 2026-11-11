@@ -25,6 +25,10 @@ STATUS = {
     "done": "🏁 Выполнен",
     "cancelled": "❌ Отменён",
 }
+STATUS_SHORT = {  # одним-двумя словами — для тесных кнопок в списках
+    "new": "принят", "confirmed": "подтверждён", "assembling": "собираем", "on_way": "в пути",
+    "ready": "готов", "done": "выполнен", "cancelled": "отменён",
+}
 FLOW = {
     "new": ("confirmed", "cancelled"),
     "confirmed": ("assembling", "on_way", "ready", "done", "cancelled"),
@@ -35,12 +39,18 @@ FLOW = {
     "cancelled": (),
 }
 ACTIVE = ("new", "confirmed", "assembling", "on_way", "ready")
-PAY_METHODS = {
+PAY_METHODS = {  # как способ оплаты выглядит в карточке заказа
     "online": "💳 Онлайн (карта или СБП)",
-    "cash": "💵 Наличными при получении",
-    "card": "💳 Картой при получении",
-    "transfer": "🔗 Перевод / ссылка от менеджера",
+    "cash": "💵 При получении (наличными или картой)",
+    "card": "💳 Картой при получении",  # так оформлялись заказы в первой версии
+    "transfer": "🔗 Переводом или по ссылке",
     "cert": "🎁 Подарочный сертификат",
+}
+PAY_BUTTONS = {  # и как на кнопке: коротко (наличные и карту клиент выбирает у кассы, а не в боте)
+    "online": "💳 Оплатить онлайн",
+    "cash": "💵 Оплата при получении",
+    "transfer": "🔗 Оплатить переводом",
+    "cert": "✅ Подтвердить заказ",
 }
 PAY_STATUS = {"none": "оплата при получении", "pending": "ждёт оплаты", "paid": "оплачен", "failed": "платёж не прошёл"}
 
@@ -163,7 +173,7 @@ def allowed_pay_methods(shop: Shop, online_enabled: bool, day: date, today: date
     if online_enabled:
         methods.append("online")
     if shop.allow_pay_on_receipt and not prepay_required(shop, day, today):
-        methods += ["cash", "card"]
+        methods.append("cash")  # «наличными или картой» — одна кнопка: как платить, клиент решает у кассы
     methods.append("transfer")
     return methods
 

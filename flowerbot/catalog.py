@@ -32,6 +32,7 @@ class Product:
     care: str
     price: int
     badge: str
+    note_prompt: str
     season_from: int | None
     season_to: int | None
     sort: int
@@ -45,7 +46,7 @@ class Product:
         return cls(
             sku=row["sku"], category=row["category"], name=row["name"], short=row["short"],
             description=row["description"], composition=tuple(json.loads(row["composition"] or "[]")),
-            care=row["care"], price=row["price"], badge=row["badge"],
+            care=row["care"], price=row["price"], badge=row["badge"], note_prompt=row["note_prompt"],
             season_from=row["season_from"], season_to=row["season_to"], sort=row["sort"],
             active=bool(row["active"]), in_stock=bool(row["in_stock"]),
             photo=row["photo"], photo_file_id=row["photo_file_id"],
@@ -124,10 +125,17 @@ def parse_catalog(data: dict) -> list[dict]:
         composition = raw.get("composition", [])
         if not isinstance(composition, list):
             raise ConfigError(f"В catalog.toml у {label}: composition — список в квадратных скобках.")
-        text_fields = {k: str(raw.get(k, "")).strip() for k in ("short", "description", "care", "badge")}
+        text_fields = {k: str(raw.get(k, "")).strip() for k in ("short", "description", "care", "badge", "note_prompt")}
         if len(text_fields["short"]) > 100 or len(text_fields["description"]) > 700 or len(text_fields["care"]) > 500:
             raise ConfigError(f"В catalog.toml у {label}: слишком длинный текст "
                               f"(короткое описание до 100, описание до 700, уход до 500 знаков).")
+        if len(text_fields["note_prompt"]) > 160:
+            raise ConfigError(f"В catalog.toml у {label}: подсказка note_prompt длиннее 160 знаков.")
+        card_size = sum(len(text_fields[k]) for k in ("short", "description", "care", "badge")) + len(name) \
+            + sum(len(str(c)) + 3 for c in composition)
+        if card_size > 900:  # подпись к фото в Telegram не бывает длиннее 1024 знаков
+            raise ConfigError(f"В catalog.toml у {label}: все тексты вместе ({card_size} знаков) не помещаются в карточку "
+                              f"с фото. Сократите описание, состав или уход — вместе до 900 знаков.")
         result.append({
             "sku": sku, "category": category, "name": name, "price": price, **text_fields,
             "composition": [str(c).strip() for c in composition if str(c).strip()],
@@ -158,13 +166,14 @@ def sync_catalog(db: Database, items: list[dict], photos_dir: Path) -> int:
             photo, sig = find_photo(photos_dir, item["sku"])
             db.run(
                 """INSERT INTO products (sku, category, name, short, description, composition, care, price, badge,
-                                         season_from, season_to, sort, active, photo, photo_sig)
+                                         note_prompt, season_from, season_to, sort, active, photo, photo_sig)
                    VALUES (:sku, :category, :name, :short, :description, :composition, :care, :price, :badge,
-                           :season_from, :season_to, :sort, 1, :photo, :sig)
+                           :note_prompt, :season_from, :season_to, :sort, 1, :photo, :sig)
                    ON CONFLICT(sku) DO UPDATE SET
                        category = excluded.category, name = excluded.name, short = excluded.short,
                        description = excluded.description, composition = excluded.composition, care = excluded.care,
-                       price = excluded.price, badge = excluded.badge, season_from = excluded.season_from,
+                       price = excluded.price, badge = excluded.badge, note_prompt = excluded.note_prompt,
+                       season_from = excluded.season_from,
                        season_to = excluded.season_to, sort = excluded.sort, active = 1,
                        photo_file_id = CASE WHEN products.photo_sig IS excluded.photo_sig THEN products.photo_file_id ELSE NULL END,
                        photo = excluded.photo, photo_sig = excluded.photo_sig""",
@@ -196,6 +205,18 @@ def list_products(db: Database, category: str | None = None, only_active: bool =
         sql += " AND category = ?"
         params.append(category)
     return [Product.from_row(r) for r in db.all(sql + " ORDER BY sort, sku", params)]
+
+
+def neighbors(db: Database, sku: str) -> tuple[Product, Product, int, int] | None:
+    """Предыдущий и следующий товар раздела (по кругу), номер этого товара и сколько всего. Для кнопок ◀ ▶."""
+    product = get_product(db, sku)
+    if product is None or not product.active:
+        return None
+    items = list_products(db, product.category)
+    index = next((i for i, p in enumerate(items) if p.sku == sku), None)
+    if index is None:
+        return None
+    return items[index - 1], items[(index + 1) % len(items)], index + 1, len(items)
 
 
 def set_in_stock(db: Database, sku: str, flag: bool) -> bool:

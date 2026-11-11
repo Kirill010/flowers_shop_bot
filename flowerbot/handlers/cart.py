@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from .. import catalog, keyboards as kb, texts
 from ..callbacks import Cart
 from ..ctx import Ctx
-from ..ui import msg_of, safe_edit
+from ..ui import msg_of, safe_edit, show_screen
 from . import checkout, manager
 
 router = Router(name="cart")
@@ -34,10 +34,10 @@ async def cart_action(call: CallbackQuery, callback_data: Cart, ctx: Ctx, state:
     if message is None or act == "noop":
         await call.answer()
         return
-    if act == "show":
+    if act == "show":  # из каталога: корзина открывается на месте списка/карточки
         await call.answer()
         text, markup = render(ctx, uid)
-        await message.answer(text, reply_markup=markup)
+        await show_screen(message, text, markup)
         return
     if act == "pay":
         await call.answer()

@@ -6,9 +6,10 @@ from aiogram.filters.callback_data import CallbackData
 
 
 class Cat(CallbackData, prefix="cat"):
-    """Раздел каталога. cat='root' — список разделов."""
+    """Список товаров раздела. new=1 — прислать новым сообщением (а не править то, на которое нажали)."""
     cat: str
     page: int = 0
+    new: int = 0
 
 
 class Prod(CallbackData, prefix="p"):

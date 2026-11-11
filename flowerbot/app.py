@@ -152,7 +152,8 @@ async def run(settings: Settings) -> None:
             log.warning("Режим настройки: ADMIN_IDS пуст, поэтому заказы не принимаются. Напишите боту /myid, "
                         "впишите номер в .env (ADMIN_IDS=...) и перезапустите бота.")
         else:
-            await notify.to_staff(bot, ctx, f"✅ Бот запущен (версия {__version__}). Панель: /admin")
+            await notify.to_staff(bot, ctx, f"✅ Бот запущен (версия {__version__}). Панель — кнопка «👑 Панель» внизу "
+                                            "(если её нет, напишите боту /start).")
 
         payments_task = asyncio.create_task(billing.payments_loop(ctx, bot))
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())

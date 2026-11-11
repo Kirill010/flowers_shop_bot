@@ -13,7 +13,7 @@ from .. import billing, certs, crm, keyboards as kb, orders, texts
 from ..callbacks import Ce
 from ..ctx import Ctx
 from ..states import CertFlow
-from ..ui import msg_of
+from ..ui import menu_for, msg_of
 from ..util import db_time, esc, phone_from_input, rub
 from ..yookassa import YooKassaError
 from . import manager
@@ -83,7 +83,8 @@ async def begin_purchase(message: Message, user: User, amount: int, ctx: Ctx, bo
         lead_id = await manager.create_lead(
             bot, ctx, user, "certificate", f"Хочу купить подарочный сертификат на {rub(amount)}. "
                                            "Нужны реквизиты или ссылка для оплаты.", amount=amount)
-        await message.answer(manager.lead_ok(ctx) if lead_id else manager.lead_limit(ctx), reply_markup=kb.main_menu())
+        await message.answer(manager.lead_ok(ctx) if lead_id else manager.lead_limit(ctx),
+                             reply_markup=menu_for(ctx, user.id))
         return
     profile = crm.get_user(ctx.db, user.id)
     phone = profile["phone"] if profile else ""
@@ -117,7 +118,7 @@ async def _got_phone(message: Message, state: FSMContext, ctx: Ctx, raw: str) ->
     data = await state.get_data()
     await state.clear()
     crm.save_contact(ctx.db, message.from_user.id, phone=phone)
-    await message.answer("Телефон сохранён ✅", reply_markup=kb.main_menu())
+    await message.answer("Телефон сохранён ✅", reply_markup=menu_for(ctx, message.from_user.id))
     await create_payment(message, message.from_user, int(data.get("amount", 0)), phone, ctx)
 
 
@@ -159,10 +160,10 @@ async def balance_code(message: Message, state: FSMContext, ctx: Ctx) -> None:
         return
     await state.clear()
     if error:
-        await message.answer(f"Сертификат {esc(cert.code)}: {esc(error)}", reply_markup=kb.main_menu())
+        await message.answer(f"Сертификат {esc(cert.code)}: {esc(error)}", reply_markup=menu_for(ctx, message.from_user.id))
         return
     await message.answer(f"🎁 Сертификат <code>{cert.code}</code>\nБаланс: <b>{rub(cert.balance)}</b> из {rub(cert.amount)}\n"
-                         f"Действует до {cert.expires:%d.%m.%Y}", reply_markup=kb.main_menu())
+                         f"Действует до {cert.expires:%d.%m.%Y}", reply_markup=menu_for(ctx, message.from_user.id))
 
 
 @router.message(CertFlow.amount)

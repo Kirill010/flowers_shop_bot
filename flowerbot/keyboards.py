@@ -1,7 +1,11 @@
-"""Все кнопки бота."""
+"""Все кнопки бота.
+
+Правило удобства: на экране одно главное действие, всё остальное — на втором плане или в раскрывающемся меню
+(«✏️ Изменить», «⚙️ Ещё»). Не больше 3 кнопок в ряду и около 6–7 рядов на экран."""
 from __future__ import annotations
 
 from datetime import date
+from math import ceil
 from sqlite3 import Row
 
 from aiogram.filters.callback_data import CallbackData
@@ -12,10 +16,13 @@ from .callbacks import Adm, Cart, Cat, Ce, Co, Info, Mg, Mo, Pay, Prod, Rv
 from .catalog import CATEGORIES, CartLine, Product
 from .config import Shop
 from .crm import LEAD_KINDS
-from .orders import FLOW, STATUS, Order
-from .util import day_label, rub
+from .orders import PAY_BUTTONS, STATUS_SHORT, Order
+from .util import day_label, rub, slot_short
 
 BTN_CANCEL = "❌ Отмена"
+BTN_MANUAL = "✏️ Ввести вручную"
+TAB_NAMES = {"bouquet": "💐 Букеты", "plant": "🌱 Растения"}
+LIST_PAGE = 8  # сколько товаров на странице списка
 
 
 def btn(text: str, data: CallbackData) -> InlineKeyboardButton:
@@ -30,56 +37,74 @@ def kb(*rows: list[InlineKeyboardButton]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[list(r) for r in rows if r])
 
 
-def main_menu() -> ReplyKeyboardMarkup:
+def noop() -> Cart:
+    return Cart(act="noop")
+
+
+# ───────────────────────── постоянное меню ─────────────────────────
+
+def main_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     t = texts
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=t.BTN_CATALOG), KeyboardButton(text=t.BTN_CART)],
-                  [KeyboardButton(text=t.BTN_DELIVERY), KeyboardButton(text=t.BTN_CERT)],
-                  [KeyboardButton(text=t.BTN_MANAGER), KeyboardButton(text=t.BTN_MAP)],
-                  [KeyboardButton(text=t.BTN_REVIEWS), KeyboardButton(text=t.BTN_ORDERS)]],
-        resize_keyboard=True, is_persistent=True, input_field_placeholder="Выберите раздел…")
+    rows = [[t.BTN_CATALOG, t.BTN_CART], [t.BTN_ORDERS, t.BTN_MANAGER], [t.BTN_DELIVERY, t.BTN_CERT],
+            [t.BTN_MAP, t.BTN_REVIEWS]]
+    if is_admin:
+        rows.append([t.BTN_PANEL])
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=x) for x in row] for row in rows], resize_keyboard=True,
+                               is_persistent=True, input_field_placeholder="Выберите раздел…")
 
 
-def contact_request() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)], [KeyboardButton(text=BTN_CANCEL)]],
-        resize_keyboard=True, one_time_keyboard=True, input_field_placeholder="+7 900 123-45-67")
+def contact_request(manual: bool = False) -> ReplyKeyboardMarkup:
+    """Кнопка «Поделиться номером». manual=True добавляет «Ввести вручную» (для оформления заказа: там нужны ещё и имя)."""
+    bottom = [KeyboardButton(text=BTN_MANUAL), KeyboardButton(text=BTN_CANCEL)] if manual else [KeyboardButton(text=BTN_CANCEL)]
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)], bottom],
+                               resize_keyboard=True, one_time_keyboard=True, input_field_placeholder="+7 900 123-45-67")
 
 
-def cancel_only() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=BTN_CANCEL)]], resize_keyboard=True, one_time_keyboard=True)
+# ───────────────────────── каталог: список → карточка ─────────────────────────
+
+def cart_button(count: int, total: int) -> InlineKeyboardButton:
+    return btn(f"🛒 Корзина · {count} · {rub(total)}", Cart(act="show"))
 
 
-# ───────────────────────── каталог ─────────────────────────
+def item_label(p: Product, month: int) -> str:
+    price = "по запросу" if p.on_request else rub(p.price)
+    mark = ""
+    if not p.on_request:
+        mark = "⛔ " if not p.in_stock else ("🌷 " if not p.in_season(month) else "")
+    return f"{mark}{p.name} · {price}"
 
-def catalog_root() -> InlineKeyboardMarkup:
-    rows = [[btn(f"{emoji} {name}", Cat(cat=cat))] for cat, (emoji, name) in CATEGORIES.items()]
+
+def catalog_list(cat: str, items: list[Product], page: int, month: int, cart_count: int = 0,
+                 cart_total: int = 0) -> InlineKeyboardMarkup:
+    rows = [[btn(("• " if c == cat else "") + TAB_NAMES[c], Cat(cat=c)) for c in CATEGORIES]]
+    for p in items[page * LIST_PAGE:(page + 1) * LIST_PAGE]:
+        rows.append([btn(item_label(p, month), Prod(act="open", sku=p.sku))])
+    pages = max(1, ceil(len(items) / LIST_PAGE))
+    if pages > 1:
+        rows.append([btn("◀", Cat(cat=cat, page=(page - 1) % pages)), btn(f"{page + 1} из {pages}", noop()),
+                     btn("▶", Cat(cat=cat, page=(page + 1) % pages))])
     rows.append([btn("💰 Подбор под бюджет", Mg(act="budget"))])
+    if cart_count:
+        rows.append([cart_button(cart_count, cart_total)])
     return kb(*rows)
 
 
-def product_card(p: Product, month: int) -> InlineKeyboardMarkup:
+def card(p: Product, month: int, *, expanded: bool, prev_sku: str, next_sku: str, index: int, total: int,
+         cart_count: int = 0, cart_total: int = 0) -> InlineKeyboardMarkup:
     if p.orderable(month):
-        action = btn("🛒 В корзину", Prod(act="add", sku=p.sku))
+        main = btn("🛒 В корзину", Prod(act="add", sku=p.sku))
     else:
-        action = btn("🔎 Цена и наличие" if p.on_request else "🔎 Наличие", Prod(act="ask", sku=p.sku))
-    return kb([btn("📖 Подробнее", Prod(act="info", sku=p.sku)), action], [btn("⬅️ Назад", Cat(cat="root"))])
-
-
-def product_details(p: Product, month: int) -> InlineKeyboardMarkup:
-    if p.orderable(month):
-        action = btn("🛒 Добавить в корзину", Prod(act="add", sku=p.sku))
-    else:
-        action = btn("🔎 Узнать цену и наличие" if p.on_request else "🔎 Узнать о наличии", Prod(act="ask", sku=p.sku))
-    return kb([action], [btn("💬 Задать вопрос менеджеру", Prod(act="question", sku=p.sku))],
-              [btn("⬅️ Назад к каталогу", Cat(cat="root"))])
-
-
-def catalog_nav(cat: str, page: int, shown_to: int, total: int) -> InlineKeyboardMarkup:
-    rows = []
-    if shown_to < total:
-        rows.append([btn("Показать ещё ▶️", Cat(cat=cat, page=page + 1))])
-    rows.append([btn("🛒 Корзина", Cart(act="show")), btn("⬅️ К разделам", Cat(cat="root"))])
+        main = btn("🔎 Цена и наличие" if p.on_request else "🔎 Наличие", Prod(act="ask", sku=p.sku))
+    more = btn("📖 Свернуть", Prod(act="open", sku=p.sku)) if expanded else btn("📖 Подробнее", Prod(act="more", sku=p.sku))
+    rows = [[main, more]]
+    if total > 1:
+        rows.append([btn("◀", Prod(act="open", sku=prev_sku)), btn(f"{index} из {total}", noop()),
+                     btn("▶", Prod(act="open", sku=next_sku))])
+    if expanded:
+        rows.append([btn("💬 Вопрос менеджеру", Prod(act="question", sku=p.sku))])
+    rows.append([btn("⬅️ Назад к списку", Cat(cat=p.category))])
+    if cart_count:
+        rows.append([cart_button(cart_count, cart_total)])
     return kb(*rows)
 
 
@@ -89,15 +114,14 @@ def cart(lines: list[CartLine]) -> InlineKeyboardMarkup:
     rows = []
     for line in lines:
         sku = line.product.sku
-        label = f"{line.product.name[:14]} × {line.qty}"
-        rows.append([btn("➖", Cart(act="dec", sku=sku)), btn(label, Cart(act="noop")),
+        rows.append([btn("➖", Cart(act="dec", sku=sku)), btn(f"{line.product.name[:14]} × {line.qty}", noop()),
                      btn("➕", Cart(act="inc", sku=sku)), btn("🗑", Cart(act="del", sku=sku))])
     if lines:
-        rows.append([btn("💳 Перейти к оплате", Cart(act="pay"))])
+        rows.append([btn("✅ Оформить заказ", Cart(act="pay"))])
         rows.append([btn("🔎 Узнать о наличии", Cart(act="check"))])
-        rows.append([btn("🧹 Очистить", Cart(act="clear")), btn("🌸 В каталог", Cat(cat="root"))])
+        rows.append([btn("🌸 Добавить ещё", Cat(cat="bouquet")), btn("🧹 Очистить", Cart(act="clear"))])
     else:
-        rows.append([btn("🌸 В каталог", Cat(cat="root"))])
+        rows.append([btn("🌸 В каталог", Cat(cat="bouquet"))])
     return kb(*rows)
 
 
@@ -105,12 +129,11 @@ def cart(lines: list[CartLine]) -> InlineKeyboardMarkup:
 
 def info_menu() -> InlineKeyboardMarkup:
     return kb([btn("🚚 Условия доставки", Info(act="delivery")), btn("💳 Способы оплаты", Info(act="payment"))],
-              [btn("🛍 Самовывоз", Info(act="pickup"))],
-              [btn("💬 Спросить менеджера", Mg(act="menu"))])
+              [btn("🛍 Самовывоз", Info(act="pickup")), btn("💬 Спросить менеджера", Mg(act="menu"))])
 
 
 def info_back() -> InlineKeyboardMarkup:
-    return kb([btn("⬅️ Назад", Info(act="menu"))], [btn("🌸 Выбрать букет", Cat(cat="root"))])
+    return kb([btn("⬅️ Назад", Info(act="menu")), btn("🌸 Выбрать букет", Cat(cat="bouquet", new=1))])
 
 
 def map_buttons(shop: Shop) -> InlineKeyboardMarkup:
@@ -133,10 +156,18 @@ def manager(shop: Shop) -> InlineKeyboardMarkup:
     return kb(*rows)
 
 
+def forward_question() -> InlineKeyboardMarkup:
+    return kb([btn("✅ Отправить менеджеру", Mg(act="fwd")), btn("Нет, спасибо", Mg(act="dismiss"))])
+
+
 # ───────────────────────── оформление заказа ─────────────────────────
 
-def co_saved(name: str, phone: str) -> InlineKeyboardMarkup:
-    return kb([btn("✅ Да, всё верно", Co(act="saved")), btn("✏️ Изменить", Co(act="edit"))])
+def co_saved() -> InlineKeyboardMarkup:
+    return kb([btn("✅ Да, всё верно", Co(act="saved")), btn("✏️ Изменить", Co(act="edit_contact"))])
+
+
+def co_name(first_name: str) -> InlineKeyboardMarkup:
+    return kb([btn(f"👤 {first_name}", Co(act="name_tg"))])
 
 
 def co_method(shop: Shop) -> InlineKeyboardMarkup:
@@ -149,13 +180,20 @@ def co_method(shop: Shop) -> InlineKeyboardMarkup:
 
 def co_zones(shop: Shop) -> InlineKeyboardMarkup:
     rows = [[btn(f"{z.name} — {rub(z.price)}", Co(act="zone", val=str(i)))] for i, z in enumerate(shop.zones)]
-    rows.append([btn("🚗 За МКАД / в другой город", Co(act="outside"))])
+    rows.append([btn("🚗 За МКАД — цену назовёт менеджер", Co(act="outside"))])
     rows.append([btn("⬅️ Назад", Co(act="back_method"))])
     return kb(*rows)
 
 
-def co_recipient() -> InlineKeyboardMarkup:
-    return kb([btn("👤 Получатель — я", Co(act="rcp", val="me")), btn("🎁 Другой человек", Co(act="rcp", val="other"))])
+def co_address() -> InlineKeyboardMarkup:
+    return kb([btn("🚗 За МКАД — цену назовёт менеджер", Co(act="outside"))], [btn("⬅️ Назад", Co(act="back_method"))])
+
+
+def co_when(items: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    """items — пары (подпись кнопки, значение). Три ближайших варианта и «Другая дата»."""
+    rows = [[btn(label, Co(act="when", val=val))] for label, val in items]
+    rows.append([btn("🗓 Другая дата", Co(act="pick_date"))])
+    return kb(*rows)
 
 
 def co_dates(days: list[date], today: date) -> InlineKeyboardMarkup:
@@ -167,8 +205,7 @@ def co_dates(days: list[date], today: date) -> InlineKeyboardMarkup:
             row = []
     if row:
         rows.append(row)
-    rows.append([btn("📅 Другая дата", Co(act="other_date"))])
-    rows.append([btn("❌ Отмена", Co(act="cancel"))])
+    rows.append([btn("📅 Ввести дату", Co(act="other_date")), btn("⬅️ Назад", Co(act="back_when"))])
     return kb(*rows)
 
 
@@ -182,7 +219,7 @@ def co_slots(items: list[tuple[str, str]]) -> InlineKeyboardMarkup:
             row = []
     if row:
         rows.append(row)
-    rows.append([btn("⬅️ Другая дата", Co(act="back_date"))])
+    rows.append([btn("⬅️ Другая дата", Co(act="pick_date"))])
     return kb(*rows)
 
 
@@ -190,17 +227,22 @@ def co_skip(act: str) -> InlineKeyboardMarkup:
     return kb([btn("Пропустить ▶️", Co(act=act))])
 
 
-def co_summary(methods: list[str], has_promo: bool, has_cert: bool, certs_possible: bool = True) -> InlineKeyboardMarkup:
-    from .orders import PAY_METHODS
-    rows = []
-    if methods == ["cert"]:
-        rows.append([btn("✅ Подтвердить заказ", Co(act="pay", val="cert"))])
-    else:
-        rows += [[btn(PAY_METHODS[m], Co(act="pay", val=m))] for m in methods]
-    rows.append([btn("❌ Убрать промокод", Co(act="promo_off")) if has_promo else btn("🏷 Промокод", Co(act="promo"))])
-    if certs_possible:
-        rows.append([btn("❌ Убрать сертификат", Co(act="cert_off")) if has_cert else btn("🎁 Сертификат", Co(act="cert"))])
-    rows.append([btn("✏️ Изменить данные", Co(act="restart")), btn("❌ Отмена", Co(act="cancel"))])
+def co_summary(methods: list[str]) -> InlineKeyboardMarkup:
+    """Главное — способы оплаты. Всё остальное — одна кнопка «Изменить», чтобы экран не был перегружен."""
+    rows = [[btn(PAY_BUTTONS[m], Co(act="pay", val=m))] for m in methods]
+    rows.append([btn("✏️ Изменить или добавить", Co(act="edit")), btn("❌ Отмена", Co(act="cancel"))])
+    return kb(*rows)
+
+
+def co_edit(delivery: bool, has_promo: bool, has_cert: bool) -> InlineKeyboardMarkup:
+    rows = [[btn("🕒 Время", Co(act="edit_when"))] + ([btn("📍 Адрес", Co(act="edit_address"))] if delivery else []),
+            [btn("💌 Открытка", Co(act="note"))] + ([btn("🎁 Получатель", Co(act="rcp"))] if delivery else []),
+            [btn("👤 Имя и телефон", Co(act="edit_contact")), btn("🏷 Промокод или сертификат", Co(act="code"))]]
+    if has_promo:
+        rows.append([btn("❌ Убрать промокод", Co(act="drop_promo"))])
+    if has_cert:
+        rows.append([btn("❌ Убрать сертификат", Co(act="drop_cert"))])
+    rows.append([btn("⬅️ Назад к заказу", Co(act="summary"))])
     return kb(*rows)
 
 
@@ -211,20 +253,23 @@ def pay_link(url: str, payment_id: str) -> InlineKeyboardMarkup:
 # ───────────────────────── мои заказы ─────────────────────────
 
 def my_orders(orders: list[Order]) -> InlineKeyboardMarkup:
-    rows = [[btn(f"№{o.id} · {day_label(o.date)} · {rub(o.total)} · {STATUS[o.status].split(' ', 1)[0]}",
-                 Mo(act="open", id=o.id))] for o in orders]
+    rows = [[btn(f"№{o.id} · {day_label(o.date)} · {rub(o.total)} · {STATUS_SHORT[o.status]}", Mo(act="open", id=o.id))]
+            for o in orders]
     return kb(*rows)
 
 
 def my_order(order: Order) -> InlineKeyboardMarkup:
-    rows = [[btn("🔁 Повторить заказ", Mo(act="repeat", id=order.id))],
-            [btn("💬 Вопрос по заказу", Mo(act="ask", id=order.id))]]
+    rows = [[btn("🔁 Повторить заказ", Mo(act="repeat", id=order.id)), btn("💬 Вопрос по заказу", Mo(act="ask", id=order.id))]]
     if order.status == "new" and order.pay_status != "paid":
-        rows.append([btn("❌ Отменить заказ", Mo(act="cancel", id=order.id))])
+        rows.append([btn("❌ Отменить заказ", Mo(act="cancel_ask", id=order.id))])
     if order.status == "done":
         rows.append([btn("⭐ Оценить заказ", Mo(act="review", id=order.id))])
     rows.append([btn("⬅️ К списку", Mo(act="list"))])
     return kb(*rows)
+
+
+def confirm_cancel_order(order_id: int) -> InlineKeyboardMarkup:
+    return kb([btn("✅ Да, отменить", Mo(act="cancel", id=order_id)), btn("↩️ Нет", Mo(act="open", id=order_id))])
 
 
 def review_request(order_id: int) -> InlineKeyboardMarkup:
@@ -263,50 +308,67 @@ def certs_menu(shop: Shop) -> InlineKeyboardMarkup:
     return kb(*rows)
 
 
-# ───────────────────────── администратор ─────────────────────────
+# ───────────────────────── сотрудники ─────────────────────────
 
-def admin_panel(paused: bool) -> InlineKeyboardMarkup:
-    return kb([btn("📦 Новые заказы", Adm(act="list", arg="new")), btn("🔥 В работе", Adm(act="list", arg="work"))],
-              [btn("📅 На сегодня", Adm(act="list", arg="today")), btn("📅 На завтра", Adm(act="list", arg="tomorrow"))],
-              [btn("📬 Обращения", Adm(act="leads")), btn("⭐ Отзывы", Adm(act="reviews"))],
-              [btn("🛒 Наличие", Adm(act="stock")), btn("📊 Статистика", Adm(act="stats"))],
-              [btn("🔎 Заказ по номеру", Adm(act="find")), btn("📷 Фото товара", Adm(act="photo_help"))],
-              [btn("▶️ Возобновить приём заказов" if paused else "⏸ Пауза заказов", Adm(act="pause"))])
+def _counted(text: str, n: int) -> str:
+    return f"{text} ({n})" if n else text
+
+
+def admin_panel(counts: dict, paused: bool = False) -> InlineKeyboardMarkup:
+    """Первый экран: только то, что нужно каждый день. Остальное — в «⚙️ Ещё»."""
+    return kb([btn(_counted("📦 Новые", counts.get("new", 0)), Adm(act="list", arg="new")),
+               btn(_counted("🗓 Сегодня", counts.get("today", 0)), Adm(act="list", arg="today"))],
+              [btn(_counted("📬 Обращения", counts.get("leads", 0)), Adm(act="leads")),
+               btn("🛒 Наличие", Adm(act="stock"))],
+              [btn("⚙️ Ещё", Adm(act="more"))])
+
+
+def admin_more(paused: bool) -> InlineKeyboardMarkup:
+    return kb([btn("📅 Завтра", Adm(act="list", arg="tomorrow")), btn("🔥 В работе", Adm(act="list", arg="work"))],
+              [btn("⭐ Отзывы", Adm(act="reviews")), btn("📊 Статистика", Adm(act="stats"))],
+              [btn("📷 Фото товаров", Adm(act="photo_help")), btn("🔎 Заказ по номеру", Adm(act="find"))],
+              [btn("▶️ Возобновить приём заказов" if paused else "⏸ Пауза заказов", Adm(act="pause"))],
+              [btn("⬅️ В панель", Adm(act="panel"))])
 
 
 def admin_back() -> InlineKeyboardMarkup:
     return kb([btn("⬅️ В панель", Adm(act="panel"))])
 
 
-def order_list(orders: list[Order]) -> InlineKeyboardMarkup:
-    rows = [[btn(f"№{o.id} · {day_label(o.date)} {o.slot[:5]} · {o.name[:12]} · {rub(o.total)}", Adm(act="order", id=o.id))]
-            for o in orders]
+def order_list(orders: list[Order], today: date) -> InlineKeyboardMarkup:
+    def when(o: Order) -> str:
+        return slot_short(o.slot) if o.date == today else f"{day_label(o.date)} {slot_short(o.slot)}"
+    rows = [[btn(f"№{o.id} · {when(o)} · {o.name[:12]} · {rub(o.total)}", Adm(act="order", id=o.id))] for o in orders]
     rows.append([btn("⬅️ В панель", Adm(act="panel"))])
     return kb(*rows)
 
 
-_NEXT = {
-    "new": [("✅ Принять", "confirmed")],
-    "confirmed": [("💐 Собираем", "assembling")],
-    "assembling": [("🚚 В пути", "on_way"), ("🛍 Готов к выдаче", "ready")],
-    "on_way": [("🏁 Выполнен", "done")],
-    "ready": [("🏁 Выполнен", "done")],
-}
-
-
-def order_staff(order: Order) -> InlineKeyboardMarkup:
+def order_staff(order: Order, back: bool = False) -> InlineKeyboardMarkup:
+    """Под заказом — только следующий шаг. Лишних шагов нет: принять → готов/передан курьеру → выполнен.
+    back=True — заказ открыт из списка в панели: добавляем «назад», чтобы не засорять чат новыми сообщениями."""
     rows = []
     if not order.is_final:
-        steps = [(t, s) for t, s in _NEXT.get(order.status, []) if s in FLOW[order.status]
-                 and not (s == "on_way" and not order.is_delivery) and not (s == "ready" and order.is_delivery)]
-        rows.append([btn(t, Adm(act="status", id=order.id, arg=s)) for t, s in steps])
-        extra = []
-        if order.pay_status != "paid" and order.to_pay > 0:
-            extra.append(btn("💰 Оплата получена", Adm(act="paid", id=order.id)))
-        extra.append(btn("❌ Отменить", Adm(act="status", id=order.id, arg="cancelled")))
-        rows.append(extra)
-    rows.append([btn("💬 Написать клиенту", Adm(act="msg", id=order.user_id))])
+        if order.status == "new":
+            rows.append([btn("✅ Принять", Adm(act="status", id=order.id, arg="confirmed"))])
+        elif order.status in ("confirmed", "assembling"):
+            rows.append([btn("🚚 Передан курьеру", Adm(act="status", id=order.id, arg="on_way"))] if order.is_delivery
+                        else [btn("🛍 Готов к выдаче", Adm(act="status", id=order.id, arg="ready"))])
+        else:  # on_way, ready
+            rows.append([btn("🏁 Выполнен", Adm(act="status", id=order.id, arg="done"))])
+        if order.pay_status == "pending" and order.to_pay > 0:
+            rows.append([btn("💰 Оплата получена", Adm(act="paid", id=order.id))])
+    last = [btn("💬 Написать клиенту", Adm(act="msg", id=order.user_id))]
+    if not order.is_final:
+        last.append(btn("❌ Отменить", Adm(act="cancel_ask", id=order.id)))
+    rows.append(last)
+    if back:
+        rows.append([btn("⬅️ В панель", Adm(act="panel"))])
     return kb(*rows)
+
+
+def confirm_cancel_staff(order_id: int) -> InlineKeyboardMarkup:
+    return kb([btn("✅ Да, отменить заказ", Adm(act="status", id=order_id, arg="cancelled")),
+               btn("↩️ Нет", Adm(act="back", id=order_id))])
 
 
 def lead(row: Row) -> InlineKeyboardMarkup:
@@ -326,6 +388,12 @@ def lead_list(rows_: list[Row]) -> InlineKeyboardMarkup:
 def stock(products: list[Product]) -> InlineKeyboardMarkup:
     rows = [[btn(("✅ " if p.in_stock else "⛔ ") + p.name, Adm(act="toggle", arg=p.sku))] for p in products]
     rows.append([btn("⬅️ В панель", Adm(act="panel"))])
+    return kb(*rows)
+
+
+def photo_pick(products: list[Product]) -> InlineKeyboardMarkup:
+    rows = [[btn(("🖼 " if p.photo else "📷 ") + p.name, Adm(act="photo", arg=p.sku))] for p in products]
+    rows.append([btn("⬅️ Назад", Adm(act="more"))])
     return kb(*rows)
 
 

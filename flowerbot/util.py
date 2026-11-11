@@ -88,6 +88,34 @@ def day_label(d: date, today: date | None = None) -> str:
     return f"{WEEKDAYS[d.weekday()]}, {base}"
 
 
+def human_day(d: date, today: date) -> str:
+    """'Сегодня', 'Завтра', 'Пт, 14 ноября' — как сказал бы человек."""
+    if d == today:
+        return "Сегодня"
+    if d == today + timedelta(days=1):
+        return "Завтра"
+    return f"{WEEKDAYS[d.weekday()]}, {d.day} {MONTHS_GEN[d.month - 1]}"
+
+
+def slot_short(label: str) -> str:
+    """'11:00–13:00' → '11–13', 'Как можно скорее' → 'скорее' (для тесных кнопок)."""
+    m = re.fullmatch(r"(\d{2}):(\d{2})\s*[–-]\s*(\d{2}):(\d{2})", label)
+    if m:
+        if m.group(2) == "00" and m.group(4) == "00":
+            return f"{int(m.group(1))}–{int(m.group(3))}"
+        return f"{m.group(1)}:{m.group(2)}–{m.group(3)}:{m.group(4)}"
+    return "скорее" if label.lower().startswith("как можно") else label
+
+
+def when_label(day: date, label: str, today: date) -> str:
+    """Подпись быстрой кнопки: '⚡ Как можно скорее', 'Сегодня 15–17', 'Завтра 9–11', 'Пт, 14.11 9–11'."""
+    if label.lower().startswith("как можно"):
+        return "⚡ Как можно скорее"
+    if day in (today, today + timedelta(days=1)):
+        return f"{human_day(day, today)} {slot_short(label)}"
+    return f"{WEEKDAYS[day.weekday()]}, {day.day:02d}.{day.month:02d} {slot_short(label)}"
+
+
 def long_date(d: date) -> str:
     return f"{d.day} {MONTHS_GEN[d.month - 1]}, {WEEKDAYS[d.weekday()].lower()}"
 

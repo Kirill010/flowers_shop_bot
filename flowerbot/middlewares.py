@@ -28,7 +28,7 @@ class UserMiddleware(BaseMiddleware):
 class Throttle(BaseMiddleware):
     """Не больше `limit` действий за `window` секунд от одного человека. Защита от спама и подбора кодов."""
 
-    def __init__(self, limit: int = 12, window: float = 10.0, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, limit: int = 30, window: float = 10.0, clock: Callable[[], float] = time.monotonic):
         self.limit, self.window, self.clock = limit, window, clock
         self.hits: dict[int, deque[float]] = {}
         self.warned: dict[int, float] = {}

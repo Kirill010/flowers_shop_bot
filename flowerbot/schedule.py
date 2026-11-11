@@ -51,6 +51,22 @@ def date_choices(shop: Shop, method: str, local: datetime, count: int = 7) -> li
     return days
 
 
+def nearest_options(shop: Shop, method: str, local: datetime, count: int = 3) -> list[tuple[date, str]]:
+    """Ближайшие свободные варианты «когда» для трёх быстрых кнопок: два в первый подходящий день и дальше по одному.
+    Так клиент в большинстве случаев выбирает время одним нажатием, а не листает календарь."""
+    options: list[tuple[date, str]] = []
+    for offset in range(0, min(shop.max_days_ahead, 30) + 1):
+        day = local.date() + timedelta(days=offset)
+        labels = slots_for(shop, method, day, local)
+        if not labels:
+            continue
+        for label in labels[: 2 if not options else 1]:
+            options.append((day, label))
+        if len(options) >= count:
+            break
+    return options[:count]
+
+
 def date_problem(shop: Shop, day: date, local: datetime) -> str:
     """Почему эту дату выбрать нельзя (пусто — можно)."""
     if day < local.date():

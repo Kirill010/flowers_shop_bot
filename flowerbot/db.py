@@ -8,7 +8,7 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .util import db_time, utcnow
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: у товара появилась подсказка для комментария («какая песня?»)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS products (
     sku TEXT PRIMARY KEY, category TEXT NOT NULL, name TEXT NOT NULL, short TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '', composition TEXT NOT NULL DEFAULT '[]', care TEXT NOT NULL DEFAULT '',
-    price INTEGER NOT NULL DEFAULT 0, badge TEXT NOT NULL DEFAULT '',
+    price INTEGER NOT NULL DEFAULT 0, badge TEXT NOT NULL DEFAULT '', note_prompt TEXT NOT NULL DEFAULT '',
     season_from INTEGER, season_to INTEGER,
     sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, in_stock INTEGER NOT NULL DEFAULT 1,
     photo TEXT, photo_sig TEXT, photo_file_id TEXT
@@ -125,9 +125,15 @@ class Database:
         self._migrate()
 
     def _migrate(self) -> None:
-        current = self.conn.execute("PRAGMA user_version").fetchone()[0]
-        if current < SCHEMA_VERSION:
-            self.conn.executescript(SCHEMA)
+        """Приводит базу к текущей схеме. Данные клиентов и заказов при этом не теряются."""
+        version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < 1:
+            self.conn.executescript(SCHEMA)  # новая база: сразу актуальная схема
+        elif version < 2:
+            columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(products)")}
+            if "note_prompt" not in columns:
+                self.conn.execute("ALTER TABLE products ADD COLUMN note_prompt TEXT NOT NULL DEFAULT ''")
+        if version < SCHEMA_VERSION:
             self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def close(self) -> None:

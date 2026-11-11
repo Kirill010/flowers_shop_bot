@@ -24,8 +24,7 @@ class Checkout(StatesGroup):
     recipient_phone = State()
     custom_date = State()
     comment = State()
-    promo = State()
-    cert = State()
+    code = State()           # промокод или код сертификата — одно поле на оба
 
 
 class CertFlow(StatesGroup):
@@ -41,3 +40,4 @@ class ReviewFlow(StatesGroup):
 class AdminFlow(StatesGroup):
     reply = State()          # ответ клиенту
     order_number = State()   # поиск заказа по номеру
+    photo = State()          # ждём фото для выбранного товара

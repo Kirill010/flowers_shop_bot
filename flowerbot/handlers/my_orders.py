@@ -76,6 +76,21 @@ async def repeat_order(call: CallbackQuery, callback_data: Mo, ctx: Ctx) -> None
     await message.answer(text, reply_markup=markup)
 
 
+@router.callback_query(Mo.filter(F.act == "cancel_ask"))
+async def cancel_ask(call: CallbackQuery, callback_data: Mo, ctx: Ctx) -> None:
+    """Сначала спрашиваем: случайное нажатие не должно отменять заказ."""
+    order = orders.get_user_order(ctx.db, callback_data.id, call.from_user.id)
+    if order is None:
+        await call.answer("Заказ не найден.", show_alert=True)
+        return
+    if order.status != "new" or order.pay_status == "paid":
+        await call.answer("Этот заказ уже нельзя отменить здесь. Напишите менеджеру — поможем.", show_alert=True)
+        return
+    await call.answer()
+    if message := msg_of(call):
+        await safe_edit(message, f"Отменить заказ №{order.id}?", kb.confirm_cancel_order(order.id))
+
+
 @router.callback_query(Mo.filter(F.act == "cancel"))
 async def cancel_order(call: CallbackQuery, callback_data: Mo, ctx: Ctx, bot: Bot) -> None:
     order = orders.get_user_order(ctx.db, callback_data.id, call.from_user.id)

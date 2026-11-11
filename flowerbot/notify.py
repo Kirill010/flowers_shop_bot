@@ -32,19 +32,42 @@ async def to_user(bot: Bot, user_id: int, text: str, markup: InlineKeyboardMarku
     return await _send(bot, user_id, text, markup) is not None
 
 
-async def to_staff(bot: Bot, ctx: Ctx, text: str, markup: InlineKeyboardMarkup | None = None) -> int:
-    """Сообщает сотрудникам: в общий чат, если он указан, иначе каждому администратору лично.
-    Возвращает, скольким получателям дошло. Если общий чат недоступен — пишем администраторам."""
+async def _to_staff(ctx: Ctx, send) -> int:
+    """Общее правило доставки сотрудникам: в общий чат, если он указан, иначе каждому администратору лично.
+    Если общий чат недоступен — пишем администраторам. send(chat_id) возвращает True, если дошло."""
     delivered = 0
     chat = ctx.settings.orders_chat_id
     if chat:
-        delivered += await _send(bot, chat, text, markup) is not None
+        delivered += bool(await send(chat))
     if not delivered:
         for admin_id in ctx.settings.admin_ids:
-            delivered += await _send(bot, admin_id, text, markup) is not None
+            delivered += bool(await send(admin_id))
+    return delivered
+
+
+async def to_staff(bot: Bot, ctx: Ctx, text: str, markup: InlineKeyboardMarkup | None = None) -> int:
+    """Сообщает сотрудникам. Возвращает, скольким получателям дошло."""
+    async def send(chat_id: int) -> bool:
+        return await _send(bot, chat_id, text, markup) is not None
+
+    delivered = await _to_staff(ctx, send)
     if not delivered:
         log.error("Сообщение для сотрудников никому не доставлено: %s", text[:80].replace("\n", " "))
     return delivered
+
+
+async def copy_to_staff(bot: Bot, ctx: Ctx, from_chat_id: int, message_ids: list[int]) -> int:
+    """Передаёт сотрудникам сообщения клиента как есть (фото, файл, голосовое) — туда же, куда уходят заказы."""
+    async def send(chat_id: int) -> bool:
+        try:
+            for message_id in message_ids:
+                await bot.copy_message(chat_id, from_chat_id, message_id)
+            return True
+        except TelegramAPIError as exc:
+            log.warning("Не удалось передать сообщение клиента в чат %s: %s", chat_id, exc)
+            return False
+
+    return await _to_staff(ctx, send)
 
 
 async def send_certificate(bot: Bot, ctx: Ctx, cert, user_id: int) -> bool:

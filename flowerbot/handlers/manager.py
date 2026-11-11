@@ -1,10 +1,12 @@
 """Связь с менеджером: вопрос, наличие, срочный заказ, телефон, подбор под бюджет, доставка за МКАД."""
 from __future__ import annotations
 
+import contextlib
 import re
 from datetime import timedelta
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
 
@@ -13,7 +15,7 @@ from ..callbacks import Mg, Prod
 from ..crm import LEAD_KINDS
 from ..ctx import Ctx
 from ..states import Ask, Budget, Callback
-from ..ui import full_name, msg_of
+from ..ui import full_name, menu_for, msg_of, safe_edit
 from ..util import clean_text, db_time, esc, phone_from_input, rub
 
 router = Router(name="manager")
@@ -138,12 +140,39 @@ async def ask_received(message: Message, state: FSMContext, ctx: Ctx, bot: Bot) 
             body += "\n\nКорзина:\n" + "\n".join(f"• {l.product.name} × {l.qty} — {rub(l.total)}" for l in lines)
     await state.clear()
     lead_id = await create_lead(bot, ctx, message.from_user, kind, body)
-    await message.answer(lead_ok(ctx) if lead_id else lead_limit(ctx), reply_markup=kb.main_menu())
+    await message.answer(lead_ok(ctx) if lead_id else lead_limit(ctx), reply_markup=menu_for(ctx, message.from_user.id))
 
 
 @router.message(Ask.text)
 async def ask_not_text(message: Message) -> None:
     await message.answer("Я пока понимаю только текст — напишите вопрос словами 🙂")
+
+
+# ───────────────────────── «это вопрос менеджеру?» (непонятное сообщение клиента) ─────────────────────────
+
+@router.callback_query(Mg.filter(F.act == "fwd"))
+async def forward_to_manager(call: CallbackQuery, state: FSMContext, ctx: Ctx, bot: Bot) -> None:
+    data = await state.get_data()
+    text, sources = data.get("fwd"), list(data.get("fwd_msgs") or [])
+    if not text:
+        await call.answer("Это сообщение уже отправлено или устарело.", show_alert=True)
+        return
+    await state.update_data(fwd=None, fwd_msgs=None, fwd_group=None)
+    lead_id = await create_lead(bot, ctx, call.from_user, "question", text)
+    if lead_id and sources:  # фото, файл или голосовое — после карточки обращения передаём и их самих
+        await notify.copy_to_staff(bot, ctx, call.from_user.id, sources)
+    await call.answer()
+    if message := msg_of(call):
+        await safe_edit(message, lead_ok(ctx) if lead_id else lead_limit(ctx), None)
+
+
+@router.callback_query(Mg.filter(F.act == "dismiss"))
+async def dismiss_forward(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(fwd=None, fwd_msgs=None, fwd_group=None)
+    await call.answer()
+    if message := msg_of(call):
+        with contextlib.suppress(TelegramAPIError):
+            await message.delete()
 
 
 # ───────────────────────── «оставить номер телефона» ─────────────────────────
@@ -180,7 +209,7 @@ async def _phone_done(message: Message, state: FSMContext, ctx: Ctx, bot: Bot, r
     lead_id = await create_lead(bot, ctx, message.from_user, "callback", "Просит перезвонить.", phone=phone)
     await message.answer(
         (f"✅ Спасибо! Перезвоним в рабочее время — обычно в течение {texts.duration(ctx.shop.response_minutes)}."
-         if lead_id else lead_limit(ctx)), reply_markup=kb.main_menu())
+         if lead_id else lead_limit(ctx)), reply_markup=menu_for(ctx, message.from_user.id))
 
 
 # ───────────────────────── подбор под бюджет ─────────────────────────
@@ -222,7 +251,7 @@ async def budget_phone(message: Message, state: FSMContext, ctx: Ctx) -> None:
         return
     crm.save_contact(ctx.db, message.from_user.id, phone=phone)
     await state.set_state(Budget.wishes)
-    await message.answer("Спасибо! 🌸", reply_markup=kb.main_menu())
+    await message.answer("Спасибо! 🌸", reply_markup=menu_for(ctx, message.from_user.id))
     await _ask_wishes(message)
 
 
@@ -236,7 +265,7 @@ async def budget_wishes(message: Message, state: FSMContext, ctx: Ctx, bot: Bot)
     await state.clear()
     text = f"Бюджет: {rub(data['budget'])}\nПожелания: {clean_text(message.text, 700)}"
     lead_id = await create_lead(bot, ctx, message.from_user, "budget", text)
-    await message.answer(lead_ok(ctx) if lead_id else lead_limit(ctx), reply_markup=kb.main_menu())
+    await message.answer(lead_ok(ctx) if lead_id else lead_limit(ctx), reply_markup=menu_for(ctx, message.from_user.id))
 
 
 @router.message(Budget.amount)

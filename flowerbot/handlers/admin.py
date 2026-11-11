@@ -1,5 +1,8 @@
 """Панель сотрудников: заказы, обращения, отзывы, наличие, статистика, сертификаты, фото, пауза.
 
+Принцип удобства: первый экран — только то, что нужно каждый день (новые заказы, сегодня, обращения, наличие) и счётчики
+прямо на кнопках. Всё редкое — в «⚙️ Ещё». Под заказом только следующий шаг, а опасное действие (отмена) — с подтверждением.
+
 ВАЖНО: фильтр IsAdmin висит на всём роутере. Любая команда и любая кнопка отсюда работает только у тех,
 чей номер указан в ADMIN_IDS. Забыть проверку в отдельной команде нельзя — в старом боте именно так и вышло."""
 from __future__ import annotations
@@ -38,24 +41,31 @@ router.callback_query.filter(IsAdmin())
 
 # ───────────────────────── панель ─────────────────────────
 
-def panel_text(ctx: Ctx) -> str:
-    new_orders = ctx.db.scalar("SELECT COUNT(*) FROM orders WHERE status = 'new'", (), 0)
-    new_leads = ctx.db.scalar("SELECT COUNT(*) FROM leads WHERE status = 'new'", (), 0)
+def counts(ctx: Ctx) -> dict:
     today = ctx.local_now().date().isoformat()
-    today_orders = ctx.db.scalar("SELECT COUNT(*) FROM orders WHERE date = ? AND status IN "
-                                 "('new','confirmed','assembling','on_way','ready')", (today,), 0)
-    out = ["👑 <b>Панель сотрудников</b>", "",
-           f"📦 Новых заказов: <b>{new_orders}</b>", f"🗓 Заказов на сегодня в работе: <b>{today_orders}</b>",
-           f"📬 Необработанных обращений: <b>{new_leads}</b>"]
-    if ctx.paused:
-        out.append("\n⏸ <b>Приём заказов приостановлен</b>")
-    return "\n".join(out)
+    return {
+        "new": ctx.db.scalar("SELECT COUNT(*) FROM orders WHERE status = 'new'", (), 0),
+        "today": ctx.db.scalar("SELECT COUNT(*) FROM orders WHERE date = ? AND status IN "
+                               "('new','confirmed','assembling','on_way','ready')", (today,), 0),
+        "leads": ctx.db.scalar("SELECT COUNT(*) FROM leads WHERE status = 'new'", (), 0),
+    }
+
+
+def pause_banner(ctx: Ctx) -> str:
+    return "\n\n⏸ <b>Приём заказов приостановлен</b>" if ctx.paused else ""
+
+
+def panel_text(ctx: Ctx) -> str:
+    c = counts(ctx)
+    body = "Что нужно сделать?" if any(c.values()) else "Всё спокойно 🙂 Новых заказов и обращений нет."
+    return f"👑 <b>Панель сотрудников</b>\n{body}{pause_banner(ctx)}"
 
 
 @router.message(Command("admin"))
+@router.message(F.text == texts.BTN_PANEL)
 async def open_panel(message: Message, state: FSMContext, ctx: Ctx) -> None:
     await state.clear()
-    await message.answer(panel_text(ctx), reply_markup=kb.admin_panel(ctx.paused))
+    await message.answer(panel_text(ctx), reply_markup=kb.admin_panel(counts(ctx), ctx.paused))
 
 
 @router.callback_query(Adm.filter(F.act == "panel"))
@@ -63,7 +73,15 @@ async def panel(call: CallbackQuery, state: FSMContext, ctx: Ctx) -> None:
     await call.answer()
     await state.clear()
     if message := msg_of(call):
-        await safe_edit(message, panel_text(ctx), kb.admin_panel(ctx.paused))
+        await safe_edit(message, panel_text(ctx), kb.admin_panel(counts(ctx), ctx.paused))
+
+
+@router.callback_query(Adm.filter(F.act == "more"))
+async def more(call: CallbackQuery, state: FSMContext, ctx: Ctx) -> None:
+    await call.answer()
+    await state.clear()
+    if message := msg_of(call):
+        await safe_edit(message, f"⚙️ <b>Ещё</b>{pause_banner(ctx)}", kb.admin_more(ctx.paused))
 
 
 @router.callback_query(Adm.filter(F.act == "pause"))
@@ -71,7 +89,7 @@ async def toggle_pause(call: CallbackQuery, ctx: Ctx) -> None:
     ctx.db.set_meta("paused", "0" if ctx.db.get_meta("paused") == "1" else "1")
     await call.answer("Приём заказов приостановлен" if ctx.paused else "Приём заказов возобновлён")
     if message := msg_of(call):
-        await safe_edit(message, panel_text(ctx), kb.admin_panel(ctx.paused))
+        await safe_edit(message, f"⚙️ <b>Ещё</b>{pause_banner(ctx)}", kb.admin_more(ctx.paused))
 
 
 @router.message(Command("pause"))
@@ -123,7 +141,7 @@ async def list_orders(call: CallbackQuery, callback_data: Adm, ctx: Ctx) -> None
     title, query = views.get(callback_data.arg, views["new"])
     items = orders.list_orders(ctx.db, limit=15, **query)
     text = f"<b>{title}</b> — {len(items)}" if items else f"<b>{title}</b>\n\nПока ничего нет 🙂"
-    await safe_edit(message, text, kb.order_list(items))
+    await safe_edit(message, text, kb.order_list(items, today))
 
 
 @router.callback_query(Adm.filter(F.act == "order"))
@@ -133,8 +151,33 @@ async def show_order(call: CallbackQuery, callback_data: Adm, ctx: Ctx) -> None:
         await call.answer("Заказ не найден.", show_alert=True)
         return
     await call.answer()
+    if message := msg_of(call):  # открываем на месте списка: чат не засоряется
+        await safe_edit(message, _card(ctx, order), kb.order_staff(order, back=True))
+
+
+@router.callback_query(Adm.filter(F.act == "back"))
+async def back_to_order(call: CallbackQuery, callback_data: Adm, ctx: Ctx) -> None:
+    """«Нет» в окошке подтверждения: возвращаем карточку заказа на место."""
+    order = orders.get_order(ctx.db, callback_data.id)
+    if order is None:
+        await call.answer("Заказ не найден.", show_alert=True)
+        return
+    await call.answer()
     if message := msg_of(call):
-        await message.answer(_card(ctx, order), reply_markup=kb.order_staff(order))
+        await safe_edit(message, _card(ctx, order), kb.order_staff(order))
+
+
+@router.callback_query(Adm.filter(F.act == "cancel_ask"))
+async def cancel_ask(call: CallbackQuery, callback_data: Adm, ctx: Ctx) -> None:
+    """Отмена — действие, которое клиент увидит (он получит сообщение), поэтому сначала спрашиваем."""
+    order = orders.get_order(ctx.db, callback_data.id)
+    if order is None or order.is_final:
+        await call.answer("Заказ не найден или уже закрыт.", show_alert=True)
+        return
+    await call.answer()
+    if message := msg_of(call):
+        await safe_edit(message, _card(ctx, order) + f"\n\n❓ <b>Отменить заказ №{order.id}?</b> Клиент получит уведомление.",
+                        kb.confirm_cancel_staff(order.id))
 
 
 @router.callback_query(Adm.filter(F.act == "status"))
@@ -157,9 +200,12 @@ async def change_status(call: CallbackQuery, callback_data: Adm, ctx: Ctx, bot: 
         extra = "\n\n⚠️ <b>Заказ был оплачен</b> — верните деньги клиенту (для онлайн-оплаты — в кабинете ЮKassa)."
     if message:
         await safe_edit(message, _card(ctx, order) + extra, kb.order_staff(order))
-    markup = kb.review_request(order.id) if new == "done" else None
-    if not await notify.to_user(bot, order.user_id, texts.status_notice(order, ctx.shop), markup) and message:
-        await message.answer("⚠️ Клиенту не удалось отправить уведомление (возможно, он заблокировал бота). Свяжитесь по телефону.")
+    notice = texts.status_notice(order, ctx.shop)
+    if notice:  # внутренний шаг «собираем» клиенту не показываем
+        markup = kb.review_request(order.id) if new == "done" else None
+        if not await notify.to_user(bot, order.user_id, notice, markup) and message:
+            await message.answer("⚠️ Клиенту не удалось отправить уведомление (возможно, он заблокировал бота). "
+                                 "Свяжитесь по телефону.")
 
 
 @router.callback_query(Adm.filter(F.act == "paid"))
@@ -191,7 +237,7 @@ async def find_number(message: Message, state: FSMContext, ctx: Ctx) -> None:
     digits = "".join(ch for ch in message.text if ch.isdigit())
     order = orders.get_order(ctx.db, int(digits)) if digits and len(digits) < 10 else None
     if order is None:
-        await message.answer("Заказ с таким номером не найден. Введите другой номер или нажмите /admin.")
+        await message.answer("Заказ с таким номером не найден. Введите другой номер или нажмите «👑 Панель».")
         return
     await state.clear()
     await message.answer(_card(ctx, order), reply_markup=kb.order_staff(order))
@@ -368,12 +414,14 @@ async def hide_review(call: CallbackQuery, callback_data: Adm, ctx: Ctx) -> None
 
 # ───────────────────────── наличие ─────────────────────────
 
+STOCK_TEXT = "🛒 <b>Наличие</b>\n\nНажмите на товар, чтобы отметить «нет сегодня» (⛔) или вернуть в наличие (✅)."
+
+
 @router.callback_query(Adm.filter(F.act == "stock"))
 async def stock(call: CallbackQuery, ctx: Ctx) -> None:
     await call.answer()
     if message := msg_of(call):
-        await safe_edit(message, "🛒 <b>Наличие</b>\n\nНажмите на товар, чтобы отметить «нет сегодня» (⛔) или вернуть в наличие (✅).",
-                        kb.stock(catalog.list_products(ctx.db)))
+        await safe_edit(message, STOCK_TEXT, kb.stock(catalog.list_products(ctx.db)))
 
 
 @router.callback_query(Adm.filter(F.act == "toggle"))
@@ -385,8 +433,7 @@ async def toggle_stock(call: CallbackQuery, callback_data: Adm, ctx: Ctx) -> Non
     catalog.set_in_stock(ctx.db, product.sku, not product.in_stock)
     await call.answer(("⛔ Нет в наличии: " if product.in_stock else "✅ В наличии: ") + product.name)
     if message := msg_of(call):
-        await safe_edit(message, "🛒 <b>Наличие</b>\n\nНажмите на товар, чтобы отметить «нет сегодня» (⛔) или вернуть в наличие (✅).",
-                        kb.stock(catalog.list_products(ctx.db)))
+        await safe_edit(message, STOCK_TEXT, kb.stock(catalog.list_products(ctx.db)))
 
 
 # ───────────────────────── статистика ─────────────────────────
@@ -411,17 +458,61 @@ async def show_stats(call: CallbackQuery, callback_data: Adm, ctx: Ctx) -> None:
     await safe_edit(message, "\n".join(out), kb.stats_periods())
 
 
-# ───────────────────────── фото товаров ─────────────────────────
+# ───────────────────────── фото товаров: два нажатия вместо команды ─────────────────────────
 
-PHOTO_HELP = ("📷 <b>Фото товара</b>\n\nОтправьте боту фото с подписью <code>/photo имя</code>, например "
-              "<code>/photo classic</code>. Имена товаров:\n")
+PHOTO_TEXT = "📷 <b>Фото товаров</b>\n\nВыберите товар и пришлите его фото. 🖼 — фото уже есть, 📷 — ещё нет."
+PHOTO_COMMAND_HELP = ("📷 Проще всего: «👑 Панель» → «⚙️ Ещё» → «📷 Фото товаров».\n"
+                      "Или отправьте фото с подписью <code>/photo имя</code>, например <code>/photo classic</code>. Имена товаров:\n")
 
 
 @router.callback_query(Adm.filter(F.act == "photo_help"))
-async def photo_help_cb(call: CallbackQuery, ctx: Ctx) -> None:
+async def photo_menu(call: CallbackQuery, state: FSMContext, ctx: Ctx) -> None:
+    await call.answer()
+    await state.clear()
+    if message := msg_of(call):
+        await safe_edit(message, PHOTO_TEXT, kb.photo_pick(catalog.list_products(ctx.db)))
+
+
+@router.callback_query(Adm.filter(F.act == "photo"))
+async def photo_choose(call: CallbackQuery, callback_data: Adm, state: FSMContext, ctx: Ctx) -> None:
+    product = catalog.get_product(ctx.db, callback_data.arg)
+    if product is None:
+        await call.answer("Товар не найден.", show_alert=True)
+        return
     await call.answer()
     if message := msg_of(call):
-        await message.answer(PHOTO_HELP + _sku_list(ctx))
+        await state.set_state(AdminFlow.photo)
+        await state.update_data(sku=product.sku)
+        await message.answer(f"📷 Пришлите фото для «{esc(product.name)}» — обычным фото, не файлом. Отмена: /cancel")
+
+
+async def _save_photo(ctx: Ctx, bot: Bot, message: Message, product: catalog.Product) -> None:
+    folder = ctx.settings.photos_dir
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{product.sku}.jpg"
+    for ext in catalog.PHOTO_EXTS:  # старые файлы этого товара убираем, чтобы не путать
+        old = folder / f"{product.sku}{ext}"
+        if old != target and old.exists():
+            old.unlink()
+    await bot.download(message.photo[-1], destination=target)
+    catalog.refresh_photo(ctx.db, folder, product.sku)
+
+
+@router.message(AdminFlow.photo, F.photo)
+async def photo_receive(message: Message, state: FSMContext, ctx: Ctx, bot: Bot) -> None:
+    product = catalog.get_product(ctx.db, (await state.get_data()).get("sku", ""))
+    await state.clear()
+    if product is None:
+        await message.answer("Товар не найден. Откройте «👑 Панель» → «⚙️ Ещё» → «📷 Фото товаров» заново.")
+        return
+    await _save_photo(ctx, bot, message, product)
+    await message.answer(f"✅ Фото для «{esc(product.name)}» сохранено. Выберите следующий товар или вернитесь назад.",
+                         reply_markup=kb.photo_pick(catalog.list_products(ctx.db)))
+
+
+@router.message(AdminFlow.photo)
+async def photo_not_a_photo(message: Message) -> None:
+    await message.answer("Пришлите именно фото 🙂 Отмена: /cancel")
 
 
 def _sku_list(ctx: Ctx) -> str:
@@ -435,18 +526,10 @@ async def upload_photo(message: Message, ctx: Ctx, bot: Bot) -> None:
     if product is None:
         await message.answer(f"Нет товара с именем «{esc(sku)}». Доступные имена:\n" + _sku_list(ctx))
         return
-    folder = ctx.settings.photos_dir
-    folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{sku}.jpg"
-    for ext in catalog.PHOTO_EXTS:  # старые файлы этого товара убираем, чтобы не путать
-        old = folder / f"{sku}{ext}"
-        if old != target and old.exists():
-            old.unlink()
-    await bot.download(message.photo[-1], destination=target)
-    catalog.refresh_photo(ctx.db, folder, sku)
+    await _save_photo(ctx, bot, message, product)
     await message.answer(f"✅ Фото для «{esc(product.name)}» сохранено — оно появится в карточке.")
 
 
 @router.message(Command("photo"))
 async def photo_cmd(message: Message, ctx: Ctx) -> None:
-    await message.answer(PHOTO_HELP + _sku_list(ctx))
+    await message.answer(PHOTO_COMMAND_HELP + _sku_list(ctx))

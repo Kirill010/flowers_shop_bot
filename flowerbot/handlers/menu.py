@@ -9,6 +9,7 @@ from aiogram.types import Message
 from .. import keyboards as kb
 from .. import texts
 from ..ctx import Ctx
+from ..ui import menu_for
 
 router = Router(name="menu")
 
@@ -20,12 +21,13 @@ async def start(message: Message, state: FSMContext, ctx: Ctx) -> None:
     text = texts.greeting(ctx.shop)
     if not ctx.staff_ready:
         text += f"\n\n⚙️ Бот ещё настраивается: заказы в нём пока не принимаются. Позвоните нам: {ctx.shop.phone}"
-    await message.answer(text, reply_markup=kb.main_menu())
+    await message.answer(text, reply_markup=menu_for(ctx, message.from_user.id))
 
 
 @router.message(Command("help"))
 async def help_(message: Message, ctx: Ctx) -> None:
-    await message.answer(texts.help_text(ctx.shop, ctx.is_admin(message.from_user.id)), reply_markup=kb.main_menu())
+    await message.answer(texts.help_text(ctx.shop, ctx.is_admin(message.from_user.id)),
+                         reply_markup=menu_for(ctx, message.from_user.id))
 
 
 @router.message(Command("myid"))
@@ -42,6 +44,6 @@ async def my_id(message: Message, ctx: Ctx) -> None:
 
 @router.message(Command("cancel"))
 @router.message(F.text == kb.BTN_CANCEL)
-async def cancel(message: Message, state: FSMContext) -> None:
+async def cancel(message: Message, state: FSMContext, ctx: Ctx) -> None:
     await state.clear()
-    await message.answer("Отменено. Выберите раздел в меню 👇", reply_markup=kb.main_menu())
+    await message.answer("Отменено. Выберите раздел в меню 👇", reply_markup=menu_for(ctx, message.from_user.id))
